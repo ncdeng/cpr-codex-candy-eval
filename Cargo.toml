@@ -1,6 +1,6 @@
 [package]
 name = "codex-proxy-plugin-candy-eval"
-version = "1.7.3"
+version = "1.9.2"
 edition = "2021"
 
 [lib]
@@ -25,3 +25,8 @@ sha1 = "0.10"
 rand = "0.8"
 crc32fast = "1.4"
 unicode-normalization = "0.1"
+# 通知邮件：复用 reqwest 已带的 rustls（ring）与 webpki 根证书，不引入新的 TLS 实现
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "1"
+base64 = "0.22"

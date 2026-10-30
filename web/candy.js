@@ -1,16 +1,47 @@
 "use strict";
 
+const SUITE_NAMES = { candy: "糖果", pelican: "鹈鹕", fingerprint: "指纹" };
+const VERDICT_NAMES = { ok: "正常", degraded: "降智" };
+const fmtInterval = (s) => (s % 3600 ? `${s / 60} 分钟` : `${s / 3600} 小时`);
+
+function scheduleLine(h) {
+  if (!h.enabled) return "定时测试：未开启";
+  const next = h.next_run_at ? new Date(h.next_run_at) : null;
+  const due = next && next > new Date() ? `下次 ${next.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "等待调度";
+  const suites = (h.suites || []).map((s) => SUITE_NAMES[s] || s).join("、") || "未选测试项";
+  const error = h.last_dispatch?.status;
+  const warning = ["dispatch_error", "storage_error", "credentials_error"].includes(error) ? " · 上次调度失败，请检查服务状态" : "";
+  const queued = h.queue?.length ? ` · 排队中：${h.queue.map((s) => SUITE_NAMES[s] || s).join("、")}` : "";
+  return `定时测试 · 每 ${fmtInterval(h.interval_seconds)} · ${suites} · ${h.model} / ${h.effort} · 糖果每轮 ${h.candy_runs} 次、答对 ≥ ${Math.min(h.pass_min, h.candy_runs)} 次算正常 · ${due}${queued}${warning}`;
+}
+
+function verdictLine(v) {
+  const name = VERDICT_NAMES[v.state] || "尚未判定";
+  const since = v.since ? `（自 ${fmtTime(v.since)}）` : "";
+  const last = v.last ? ` · 上一轮答对 ${v.last.correct}/${v.last.answered}${v.last.failed ? `，出错 ${v.last.failed}` : ""}` : "";
+  const pending = v.pending ? " · 本轮测试中" : "";
+  const waiting = v.candidate ? ` · 待确认：${VERDICT_NAMES[v.candidate] || v.candidate} ${v.streak} 轮` : "";
+  const mail = v.mail_error ? ` · ${v.mail_error}` : v.mail_pending ? " · 通知邮件待发送" : "";
+  return `<li><b>${esc(v.label)}</b>：${esc(name + since + last + pending + waiting + mail)}</li>`;
+}
+
+function mailLine(email) {
+  if (!email?.enabled) return "邮件通知：未开启";
+  if (!email.ready) return `邮件通知：设置不完整（${email.error || "请检查插件设置"}）`;
+  return `邮件通知：已开启，发给 ${email.recipients} 个邮箱`;
+}
+
 function renderHourlyCandy() {
   const node = $("hourly-candy");
   node.hidden = !hourlyCandy;
   if (!hourlyCandy) return;
-  if (!hourlyCandy.enabled) { node.textContent = "每小时自动测试：未启用（可在插件设置中开启）"; return; }
-  const next = hourlyCandy.next_run_at ? new Date(hourlyCandy.next_run_at) : null;
-  const due = next && next > new Date() ? `下次 ${next.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "等待调度";
-  const error = hourlyCandy.last_dispatch?.status;
-  const warning = ["dispatch_error", "storage_error", "credentials_error"].includes(error) ? " · 上次调度失败，请检查服务状态" : "";
-  node.textContent = `每小时自动测试 · ${hourlyCandy.model} / ${hourlyCandy.effort} · 每账号 1 次 · ${due}${warning}`;
+  const h = hourlyCandy;
+  const verdicts = (h.verdicts || []).filter((v) => v.state || v.pending || v.last);
+  node.innerHTML = `<div>${esc(scheduleLine(h))}（在「总览」页设置）</div>`
+    + (verdicts.length ? `<ul class="verdicts">${verdicts.map(verdictLine).join("")}</ul>` : "")
+    + `<div>${esc(mailLine(h.email))}</div>`;
 }
+
 const candyExpanded = new Set();
 const candyAnswersExpanded = new Set();
 const candySelected = new Set();

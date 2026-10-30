@@ -30,6 +30,9 @@ const ICONS = {
   play: '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>',
   eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
   "eye-off": '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  settings: '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
   "trash-2": '<path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
 };
 const icon = (name, cls = "") =>
@@ -104,7 +107,7 @@ function credentialView(a, open) {
 }
 function unavailableReason(a) {
   const retry = a.next_retry_after && `预计 ${fmtTime(a.next_retry_after, false)} 恢复`;
-  return [statusText(a.status_message), retry].filter(Boolean).join("\n") || "CPA 暂时无法使用此凭证";
+  return [statusText(a.status_message), retry].filter(Boolean).join("\n") || "CPR 暂时无法使用此账号";
 }
 // CPA keeps the upstream error body, often JSON; show only its message.
 function statusText(text) {
@@ -121,7 +124,7 @@ const disabledFor = (reason) => reason ? `disabled data-tip="${esc(reason)}"` : 
 // OpenAI-compatible providers can only be switched as a whole in CPA.
 const switchable = (a) => a.source === "auth_files" || a.id.startsWith(a.provider + ":apikey:");
 function enableSwitch(a) {
-  const locked = !switchable(a) ? "请在 CPA 中启用或停用此凭证" : credentialBusy(a) ? `${busyTest(a)}进行中，结束后才能切换` : switching.has(a.id) ? "正在保存…" : "";
+  const locked = !switchable(a) ? "请在 CPR 的「账号管理」中启用或停用此账号" : credentialBusy(a) ? `${busyTest(a)}进行中，结束后才能切换` : switching.has(a.id) ? "正在保存…" : "";
   return `<label class="switch"><input type="checkbox" role="switch" data-enable="${esc(a.id)}" aria-label="启用此凭证" aria-busy="${switching.has(a.id)}" ${a.disabled ? "" : "checked"} ${disabledFor(locked)}></label>`;
 }
 

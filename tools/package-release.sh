@@ -33,7 +33,7 @@ python3 - "$output" "$version" <<'PY'
 import hashlib,json,sys,tarfile
 from pathlib import Path
 folder=Path(sys.argv[1]); version=sys.argv[2]
-package=folder/f'nmbb.codex-candy-eval-{version}-x86_64-unknown-linux-gnu.tar.gz'
+package=folder/f'ncdeng.codex-candy-eval-{version}-x86_64-unknown-linux-gnu.tar.gz'
 with tarfile.open(package) as archive:
     manifest=json.load(archive.extractfile('plugin.json'))
     assert manifest['version']==version

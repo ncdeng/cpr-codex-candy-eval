@@ -90,7 +90,7 @@ pub async fn list_models(
         &ModelListRequest {
             client_key_id: client_key_id.to_owned(),
             protocol: OPENAI_PROTOCOL.to_owned(),
-            client_version: format!("nmbb.codex-candy-eval/{}", env!("CARGO_PKG_VERSION")),
+            client_version: format!("ncdeng.codex-candy-eval/{}", env!("CARGO_PKG_VERSION")),
         },
     )
     .await?;

@@ -19,7 +19,7 @@ from pathlib import Path
 
 BASE = Path('/opt/codex-proxy-rs')
 PG = 'codex-proxy-rs-postgres-1'
-PLUGIN = 'nmbb.codex-candy-eval'
+PLUGIN = 'ncdeng.codex-candy-eval'
 CONTEXT = ssl._create_unverified_context()
 POLL_LIMIT_SECONDS = 420
 

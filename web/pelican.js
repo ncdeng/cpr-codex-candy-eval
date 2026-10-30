@@ -17,6 +17,7 @@ function pelicanPage(credentialID, recordID) {
       if (!pelicanPages.has(key)) return;
       pelicanPages.set(key, page);
       renderPelican();
+      renderOverview();
     };
     api(`${BASE}/pelican/record?${new URLSearchParams({ auth_id: credentialID, id: recordID })}`)
       .then((r) => settle(r.html), (err) => err instanceof AuthError ? showLogin(err.message) : settle(err));

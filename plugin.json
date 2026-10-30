@@ -2,61 +2,53 @@
   "manifestVersion": 2,
   "name": "codex-candy-eval",
   "displayName": "Codex 降智与指纹测试",
-  "publisher": "nmbb",
-  "version": "1.7.3",
+  "publisher": "ncdeng",
+  "version": "1.9.2",
   "description": "CPR（codex-proxy-rs）原生 Rust 插件：Codex 账号降智检测、模型指纹对比、深度追踪与鹈鹕绘图测试套件（魔改移植自 cpa-plugin-codex-candy-eval）",
   "license": "MIT",
   "author": "nmbb",
   "engines": {
-    "codex-proxy-rs": ">=3.33.0, <3.36.0"
+    "codex-proxy-rs": ">=3.33.0, <3.37.0"
   },
   "main": "bin/plugin",
   "runtime": "trustedProcess",
   "contributes": {
-    "management": { "version": 2 },
+    "management": {
+      "version": 2
+    },
     "command_line": {},
     "maintenance": {}
   },
   "configurationSchema": {
     "type": "object",
     "properties": {
+      "smtp_password": {
+        "type": "string",
+        "title": "SMTP 授权码（邮件通知用）",
+        "description": "QQ 邮箱填“授权码”，不是登录密码。CPR 加密保存、不回显。其余定时测试和邮件设置都在插件页面的「总览」里改。"
+      },
       "api_base_url": {
         "type": "string",
-        "title": "CPR 本机接口地址",
+        "title": "高级：CPR 本机接口地址",
         "description": "插件与 CPR 共用网络命名空间。仅接受回环 IP，不接受域名、认证或路径；默认无需填写。",
         "default": "http://127.0.0.1:8080"
       },
       "test_key_id": {
         "type": "string",
-        "title": "已有测试 Key ID",
-        "description": "复用 CPR 中已有的测试 Key。填写 ID 或下方名称之一；插件不会创建分组或 Key。"
+        "title": "高级：共享测试 Key ID",
+        "description": "一般留空：留空时插件为每个账号自动创建只含该账号的测试分组和 Key，测试结果一定记在回答的账号上。填写后改为所有账号共用这个已有 Key（CPR 自行选号，结果可能记错账号）。"
       },
       "test_key_name": {
         "type": "string",
-        "title": "已有测试 Key 名称",
-        "description": "当不清楚 Key ID 时可填写 CPR 中的唯一名称；名称重复时请改填 ID。"
-      },
-      "hourly_candy_enabled": {
-        "type": "boolean",
-        "title": "每小时自动测试糖果题",
-        "description": "每个启用账号每小时测试 1 次；后台执行，忙碌账号跳过，重启不重复补跑。",
-        "default": false
-      },
-      "hourly_candy_model": {
-        "type": "string",
-        "title": "自动糖果测试模型",
-        "minLength": 1,
-        "default": "gpt-6.1-sol"
-      },
-      "hourly_candy_effort": {
-        "type": "string",
-        "title": "自动糖果测试推理强度",
-        "enum": ["none", "low", "medium", "high", "xhigh", "max"],
-        "default": "low"
+        "title": "高级：共享测试 Key 名称",
+        "description": "一般留空。要用共享 Key 时，可填 CPR 中的唯一名称代替 ID；名称重复时请改填 ID。"
       }
     },
-    "additionalProperties": false
+    "additionalProperties": true
   },
+  "secretFields": [
+    "smtp_password"
+  ],
   "resources": {
     "web/ui.html": "text/html",
     "web/theme.css": "text/css",

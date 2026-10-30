@@ -79,7 +79,7 @@ pub async fn submit(
         let executor = tokio::select! {
             biased;
             _ = lease.cancelled() => continue,
-            executor = async { shared.for_credential(&credential) } => executor,
+            executor = shared.for_credential(host, &credential) => executor,
         };
         let executor = match executor {
             Ok(executor) => executor,

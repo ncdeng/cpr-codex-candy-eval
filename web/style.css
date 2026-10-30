@@ -1,7 +1,7 @@
 /* Layout */
 :root {
-  /* Content stays within CPAMP's 1280px .container width so wide screens don't spread the list apart. */
-  --page-width: 1280px;
+  /* 铺满 CPR 给插件的区域；列表列宽仍有上限，总览卡片按宽度自动换行。 */
+  --page-width: none;
   --list-padding: 22px; --list-gap: 16px; --list-checkbox: 22px; --credential-indent: 20px; --switch-width: 32px; --action-width: 88px;
   --credential-track: minmax(0, 300px); --result-track: minmax(0, 280px); --marks-width: 208px;
 }
@@ -345,6 +345,9 @@ dialog[open] { position: fixed; inset: auto; top: var(--dialog-top, 50%); left: 
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; color: var(--muted); font-size: 12px; line-height: 20px; margin: 0 4px 10px; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .legend #rate-scope { margin-left: auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+#hourly-candy { flex-direction: column; align-items: flex-start; gap: 2px; }
+#hourly-candy .verdicts { margin: 0; padding-left: 1.2em; }
+#hourly-candy .btn { margin-left: 8px; padding: 0 10px; height: 22px; font-size: 12px; }
 .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
 .login { max-width: 380px; margin: 12vh auto 0; padding: 24px; }
 .login h2 { margin: 0 0 6px; font-size: 17px; }
@@ -416,4 +419,72 @@ dialog[open] { position: fixed; inset: auto; top: var(--dialog-top, 50%); left: 
 @media (prefers-reduced-motion: reduce) {
   .spin, #refresh[aria-busy="true"] .icon { animation: none; }
   .page-navigation button, .mark-hit, .copy-btn, .chev, .credential .name, .switch > input, .switch > input::before { transition: none; }
+}
+
+/* 总览：工具栏、页面内设置、账号卡片网格 */
+#overview-panel { --preview-scale: .3; }
+.ov-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 12px; }
+.ov-search { display: flex; align-items: center; gap: 6px; flex: 0 1 300px; height: 34px; padding: 0 10px; border: 1px solid var(--control-line); border-radius: calc(var(--radius) - 4px); background: var(--field, var(--control-bg)); color: var(--muted); }
+.ov-search .icon { width: 15px; height: 15px; flex: none; }
+.ov-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; }
+.ov-filter { flex: 0 0 140px; }
+.ov-spacer { flex: 1; }
+.ov-toolbar .btn { height: 34px; }
+.ov-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 4px 12px; color: var(--muted); font-size: 12px; }
+.ov-chip { padding: 1px 9px; border-radius: 999px; background: var(--control-bg); border: 1px solid var(--control-line); font-weight: 600; }
+.ov-chip.ok { color: var(--success-ink); background: var(--success-soft); border-color: transparent; }
+.ov-chip.degraded { color: var(--danger-ink); background: var(--danger-soft); border-color: transparent; }
+.ov-schedule { min-width: 0; overflow-wrap: anywhere; }
+.ov-updated { margin-left: auto; white-space: nowrap; }
+.ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; align-items: stretch; }
+.ov-grid > .empty { grid-column: 1 / -1; }
+.ov-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 12px; transition: box-shadow .2s, translate .2s; }
+.ov-card:hover { translate: 0 -1px; }
+.ov-card.is-degraded { border-color: var(--danger-line); box-shadow: 0 0 0 1px var(--danger-line), var(--shadow); }
+.ov-card.is-off { opacity: .6; }
+.ov-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ov-head .tag { flex: none; }
+.ov-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.masked .ov-name { filter: blur(5px); user-select: none; }
+.ov-thumb { position: relative; aspect-ratio: 4 / 3; overflow: hidden; border-radius: calc(var(--radius) - 4px); background: var(--control-bg); border: 1px solid var(--control-line); }
+.ov-thumb .preview { width: 100%; height: 100%; border-radius: inherit; }
+.ov-thumb.empty { display: grid; place-items: center; color: var(--faint); font-size: 12px; }
+.ov-thumb.empty span { display: inline-flex; align-items: center; gap: 6px; }
+.ov-body { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+.ov-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.ov-line .icon { width: 13px; height: 13px; flex: none; }
+.ov-line.muted { color: var(--faint); }
+.ov-line.warn { color: var(--warning-ink); }
+.ov-line.running { color: var(--accent-ink, var(--accent)); }
+.ov-right { margin-left: auto; }
+.ov-led { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+.ov-led.on { background: var(--success); }
+.ov-dots { display: inline-flex; flex-wrap: wrap; gap: 3px; margin-left: auto; }
+.ov-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); cursor: help; }
+.ov-dot.ok { background: var(--success); }
+.ov-dot.bad { background: var(--danger); }
+.ov-dot.err, .ov-dot.skip { background: var(--warning-ink); opacity: .7; }
+.ov-state { flex: none; padding: 1px 9px; border-radius: 999px; font-weight: 700; background: var(--control-bg); color: var(--muted); border: 1px solid var(--control-line); }
+.ov-state.ok { background: var(--success-soft); color: var(--success-ink); border-color: transparent; }
+.ov-state.degraded { background: var(--danger-soft); color: var(--danger-ink); border-color: transparent; }
+.ov-actions { display: flex; gap: 8px; margin-top: auto; }
+.ov-actions .btn { flex: 1; height: 30px; min-width: 0; padding: 0 8px; }
+.ov-settings { padding: 18px 20px; margin-bottom: 12px; }
+.ov-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 20px 32px; }
+.ov-settings fieldset { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.ov-settings legend { display: flex; align-items: center; gap: 6px; padding: 0; margin-bottom: 4px; font-weight: 700; color: var(--ink); }
+.ov-settings legend .icon { width: 16px; height: 16px; color: var(--muted); }
+.ov-settings .switch { font-size: 13px; color: var(--ink); }
+.ov-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 14px; }
+.ov-fields .wide { grid-column: span 2; }
+.ov-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 13px; }
+.ov-checks label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.ov-hint { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; }
+.ov-hint .icon { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.ov-settings-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.ov-settings-actions .meta { margin-right: auto; color: var(--warning-ink); font-size: 12px; }
+@media (max-width: 640px) {
+  .ov-search { flex-basis: 100%; }
+  .ov-fields .wide { grid-column: 1 / -1; }
+  .ov-updated { margin-left: 0; }
 }

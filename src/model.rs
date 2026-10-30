@@ -153,6 +153,66 @@ pub struct PersistedState {
     /// Persisted dispatch watermark: restarts never replay the previous hourly slot.
     #[serde(default)]
     pub hourly_candy_at: i64,
+    /// 定时测试对每个账号的降智判定、待结算轮次与待发邮件。
+    #[serde(default)]
+    pub verdicts: std::collections::BTreeMap<String, Verdict>,
+    /// 插件页面保存的定时测试与邮件设置（不含授权码），覆盖 CPR 插件配置里的同名旧值。
+    #[serde(default)]
+    pub settings: serde_json::Map<String, serde_json::Value>,
+}
+
+/// 一个账号的降智判定状态；`state` 为 ok / degraded，空表示尚未判定。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Verdict {
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub since: String,
+    /// 与当前状态不同、正在等待连续确认的判定及其连续轮数。
+    #[serde(default)]
+    pub candidate: String,
+    #[serde(default)]
+    pub streak: u32,
+    #[serde(default)]
+    pub round: Option<PendingRound>,
+    #[serde(default)]
+    pub last: Option<RoundSummary>,
+    #[serde(default)]
+    pub mail: Option<PendingMail>,
+    #[serde(default)]
+    pub mail_error: String,
+}
+
+/// 定时调度已提交、尚未结算的一轮糖果题。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingRound {
+    pub started_at: String,
+    pub model: String,
+    pub effort: String,
+    pub runs: u32,
+}
+
+/// 一轮糖果题的结算结果；`result` 为 ok / degraded / unknown。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoundSummary {
+    pub time: String,
+    pub model: String,
+    pub effort: String,
+    pub correct: u32,
+    pub answered: u32,
+    pub failed: u32,
+    pub result: String,
+}
+
+/// 状态变化后尚未成功发出的通知邮件，失败后按退避重试。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingMail {
+    pub subject: String,
+    pub body: String,
+    #[serde(default)]
+    pub attempts: u32,
+    #[serde(default)]
+    pub next_at: i64,
 }
 
 /// 把新记录追加到历史尾部并裁剪到上限。

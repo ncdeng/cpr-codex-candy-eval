@@ -20,7 +20,7 @@ async fn test_plugin_hello_handshake() {
     let handshake = Handshake {
         protocol_version: PROTOCOL_VERSION,
         artifact_sha256: "test_digest".into(),
-        plugin_id: "nmbb.codex-candy-eval".into(),
+        plugin_id: "ncdeng.codex-candy-eval".into(),
         instance_id: "test_instance".into(),
         generation: 1,
         incarnation: "test_incarnation".into(),

@@ -6,7 +6,7 @@ const DEFAULT_MODEL = "gpt-6.1-sol";
 const DEFAULT_EFFORT = "low";
 const DEFAULT_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
 const HIDDEN_MODEL = (id) => id.toLowerCase().includes("image");
-const tabNames = ["candy", "modeltrace", "pelican"];
+const tabNames = ["overview", "candy", "modeltrace", "pelican"];
 const tabPrefixes = ["", "fp-", "mt-", "pl-"];
 
 let key = "";
@@ -141,6 +141,7 @@ function fillModels() {
   for (const [id, models] of [["model", ids], ["fp-model", probeModels], ["mt-model", probeModels], ["pl-model", ids]]) {
     fillSelect(id, models, $(id).value || preference(id, DEFAULT_MODEL), DEFAULT_MODEL);
   }
+  fillOverviewSettings();
 }
 // Rows are keyed by credential, and an update patches only the markup that changed, so the rest keeps its
 // state, such as focus or a loaded preview.
@@ -215,6 +216,7 @@ function render() {
   setNotice("storage-error", storageError);
   renderCredentialFilters();
   renderHourlyCandy();
+  renderOverview();
   renderCandy();
   renderFingerprints();
   renderModelTrace();
@@ -259,6 +261,7 @@ async function load({ refresh = false, quiet = false } = {}) {
     pruneCredentialCatalog();
     storageError = data.storage_error || "";
     hourlyCandy = data.hourly_candy || null;
+    ovUpdatedAt = Date.now();
     loadError = "";
     setNotice("load-error", "");
     const ids = new Set(credentials.map((a) => a.id));
@@ -391,7 +394,8 @@ function switchTab(name) {
     $(tab + "-panel").hidden = !active;
   }
   hideTip();
-  savePreference("tab", name);
+  savePreference("page", name);
+  if (name === "overview") fitOverviewThumbs();
 }
 const BUSY_TESTS = [["running", "糖果测试"], ["fingerprint_running", "指纹测试"], ["modeltrace_running", "ModelTrace 测试"], ["pelican_running", "鹈鹕测试"]];
 const busyTest = (a) => BUSY_TESTS.find(([field]) => a[field])?.[1] || "";
@@ -527,6 +531,7 @@ initializeCandy();
 initializeFingerprint();
 initializeModelTrace();
 initializePelican();
+initializeOverview();
 document.querySelectorAll("[data-icon]").forEach((el) => { el.outerHTML = icon(el.dataset.icon, el.dataset.class); });
 
 for (const id of ["flash", "load-error", "catalog-error", "storage-error"]) {
@@ -596,8 +601,8 @@ for (const name of tabNames) {
     switchTab(next); $("tab-" + next).focus();
   });
 }
-const savedTab = preference("tab", "candy");
-switchTab(tabNames.includes(savedTab) ? savedTab : "candy");
+const savedTab = preference("page", "overview");
+switchTab(tabNames.includes(savedTab) ? savedTab : "overview");
 
 for (const [prefix, type, selection, submit] of [["", "candy", candySelected, runCandy], ["fp-", "fp", fpSelected, runFingerprint], ["mt-", "mt", mtSelected, runModelTrace], ["pl-", "pl", plSelected, runPelican]]) {
   // Each test keeps its own settings, saved by control after the control normalizes its value.

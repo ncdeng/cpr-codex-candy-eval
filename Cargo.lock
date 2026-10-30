@@ -120,8 +120,9 @@ dependencies = [
 
 [[package]]
 name = "codex-proxy-plugin-candy-eval"
-version = "1.7.3"
+version = "1.9.2"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "crc32fast",
  "gateway-plugin-sdk",
@@ -129,12 +130,15 @@ dependencies = [
  "rand 0.8.8",
  "regex",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sha1",
  "sha2",
  "tokio",
+ "tokio-rustls",
  "unicode-normalization",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -1710,7 +1714,7 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.9.1"
+version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 

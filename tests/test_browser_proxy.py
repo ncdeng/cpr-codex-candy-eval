@@ -69,7 +69,7 @@ class BrowserProxyRedactionContract(unittest.TestCase):
                  (isinstance(node, ast.FunctionDef) and node.name in ('alias', 'sanitise', 'restore')) or
                  (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in constants for t in node.targets))]
         self.namespace = {'re': __import__('re'), 'threading': threading,
-                          'ops': SimpleNamespace(PLUGIN='nmbb.codex-candy-eval')}
+                          'ops': SimpleNamespace(PLUGIN='ncdeng.codex-candy-eval')}
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), 'exec'), self.namespace)
 
     def test_identity_alias_is_uuid_shaped_stable_and_restorable(self):

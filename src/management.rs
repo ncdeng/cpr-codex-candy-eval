@@ -73,6 +73,10 @@ pub fn registration() -> ManagementRegistration {
             json("DELETE", "api/all/results"),
             json_body("POST", "api/inspection"),
             json("GET", "api/inspection"),
+            json_body("POST", "api/notify/test"),
+            json("GET", "api/settings"),
+            json_body("POST", "api/settings"),
+            json_body("POST", "api/schedule/run"),
         ],
         resources: crate::RESOURCES
             .iter()
@@ -159,7 +163,7 @@ pub async fn handle_with_config(
             json_reply(200, &management_config(state, host).await?)
         }
         ("GET", "v8/management/config/api-keys") => json_reply(200, &json!({"api-keys": []})),
-        ("GET", "api/models" | "v1/models") => match catalog(host).await {
+        ("GET", "api/models" | "v1/models") => match catalog(state, host).await {
             Ok(models) => json_reply(
                 200,
                 &json!({"data": models.iter().map(|id| json!({"id": id})).collect::<Vec<_>>()}),
@@ -195,6 +199,45 @@ pub async fn handle_with_config(
             )
         }
         ("GET", "api/state") => state_reply(state, host, config).await,
+        ("GET", "api/settings") => {
+            let effective = crate::hourly::effective(config, &state.settings().await);
+            json_reply(200, &crate::hourly::settings_view(&effective))
+        }
+        ("POST", "api/settings") => {
+            let input = serde_json::from_slice::<Value>(&call.payload).unwrap_or(Value::Null);
+            match crate::hourly::validate_settings(&input) {
+                Ok(settings) => match state.save_settings(host, settings).await {
+                    Ok(()) => {
+                        let effective = crate::hourly::effective(config, &state.settings().await);
+                        json_reply(200, &crate::hourly::settings_view(&effective))
+                    }
+                    Err(error) => json_reply(409, &json!({"error":format!("保存设置失败：{error}")})),
+                },
+                Err(error) => json_reply(400, &json!({"error":error})),
+            }
+        }
+        ("POST", "api/schedule/run") => {
+            let effective = crate::hourly::effective(config, &state.settings().await);
+            match crate::hourly::run_now(state, host, &effective).await {
+                Ok(()) => json_reply(202, &json!({"queued":true})),
+                Err(error) => json_reply(409, &json!({"error":error})),
+            }
+        }
+        ("POST", "api/notify/test") => match crate::notify::mail_config(
+            &crate::hourly::effective(config, &state.settings().await),
+        ) {
+            Ok(Some(mail)) => {
+                match crate::notify::send(&mail, "【降智测试】测试邮件", &crate::hourly::test_mail_body()).await {
+                    Ok(()) => json_reply(200, &json!({"sent":true, "recipients":mail.to.len()})),
+                    Err(error) => json_reply(502, &json!({"error":format!("测试邮件发送失败：{error}")})),
+                }
+            }
+            Ok(None) => json_reply(
+                400,
+                &json!({"error":"邮件通知没开：请先在「总览 → 定时与通知设置」里打开邮件通知并保存"}),
+            ),
+            Err(error) => json_reply(400, &json!({"error":error})),
+        },
         ("POST", "api/storage/recover") => {
             if call.payload.len() > crate::storage::MAXIMUM_SNAPSHOT_BYTES {
                 return json_reply(413, &json!({"error":"恢复快照超过容量，原历史未被覆盖"}));
@@ -312,8 +355,18 @@ pub(crate) async fn refresh_credentials(
         )
     })?;
     let count = accounts.len();
+    let plans = plan_types(host).await;
     state
-        .set_credentials(accounts.iter().map(to_credential).collect())
+        .set_credentials(
+            accounts
+                .iter()
+                .map(|account| {
+                    let mut credential = to_credential(account);
+                    credential.plan_type = plans.get(&credential.id).cloned().unwrap_or_default();
+                    credential
+                })
+                .collect(),
+        )
         .await;
     Ok(count)
 }
@@ -326,17 +379,87 @@ async fn probe_key(host: &HostClient) -> Option<String> {
         .and_then(|keys| keys.into_iter().find(|key| key.enabled).map(|key| key.id))
 }
 
-/// 控制台使用的全局模型目录。
-async fn catalog(host: &HostClient) -> Result<Vec<String>, PluginFault> {
+#[derive(Deserialize)]
+struct AdminModel {
+    id: String,
+}
+#[derive(Deserialize)]
+struct AdminModels {
+    models: Vec<AdminModel>,
+}
+
+/// 控制台使用的全局模型目录：所有启用账号可用模型的并集。
+/// 以前用「第一个启用的 Key」查，那把 Key 的分组里没有账号时目录就是空的；
+/// 只有逐个账号都查不到时，才回退到旧做法。
+async fn catalog(state: &StateManager, host: &HostClient) -> Result<Vec<String>, PluginFault> {
+    let mut credentials = state.credentials().await;
+    if credentials.is_empty() {
+        refresh_credentials(state, host).await?;
+        credentials = state.credentials().await;
+    }
+    let mut models = std::collections::BTreeSet::new();
+    for credential in credentials.iter().filter(|credential| !credential.disabled) {
+        models.extend(account_models(host, &credential.id).await);
+    }
+    if !models.is_empty() {
+        return Ok(models.into_iter().collect());
+    }
     let Some(key) = probe_key(host).await else {
         return Ok(Vec::new());
     };
     host_calls::list_models(host, &key).await
 }
 
-/// 单账号可见模型：CPR 不提供账号级目录，回退到全局目录。
-async fn account_models(host: &HostClient, _account_id: &str) -> Vec<String> {
-    catalog(host).await.unwrap_or_default()
+/// 单账号可用模型：读 CPR 管理端该账号的模型缓存；读取失败时返回空。
+async fn account_models(host: &HostClient, account_id: &str) -> Vec<String> {
+    crate::background_transport::admin::<AdminModels>(
+        host,
+        crate::background_transport::query("/api/admin/accounts/models", &[("accountId", account_id)]),
+    )
+    .await
+    .map(|data| data.models.into_iter().map(|model| model.id).collect())
+    .unwrap_or_default()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminAccount {
+    id: String,
+    #[serde(default)]
+    plan_type: Option<String>,
+}
+#[derive(Deserialize)]
+struct AdminAccountPage {
+    items: Vec<AdminAccount>,
+}
+
+/// 账号套餐：宿主回调的账号事实不带套餐，从 CPR 管理端账号列表补上；读取失败时不显示套餐。
+async fn plan_types(host: &HostClient) -> BTreeMap<String, String> {
+    let mut plans = BTreeMap::new();
+    for page in 1..=10u32 {
+        let page_text = page.to_string();
+        let Ok(data) = crate::background_transport::admin::<AdminAccountPage>(
+            host,
+            crate::background_transport::query(
+                "/api/admin/accounts",
+                &[("page", &page_text), ("pageSize", "100")],
+            ),
+        )
+        .await
+        else {
+            break;
+        };
+        let count = data.items.len();
+        plans.extend(
+            data.items
+                .into_iter()
+                .filter_map(|account| account.plan_type.map(|plan| (account.id, plan))),
+        );
+        if count < 100 {
+            break;
+        }
+    }
+    plans
 }
 
 /// 控制台读取的配置形状；账号来自 CPR 宿主，因此这里不带 CPA 凭证。
@@ -364,14 +487,18 @@ async fn state_reply(
 ) -> Result<TypedReply<ManagementResponse>, PluginFault> {
     refresh_credentials(state, host).await?;
     let (credentials, storage_error) = state.views().await;
-    let models = catalog(host).await.unwrap_or_default();
+    let models = catalog(state, host).await.unwrap_or_default();
     json_reply(
         200,
         &json!({
             "auths": credentials,
             "models": models,
             "storage_error": storage_error,
-            "hourly_candy": crate::hourly::status(state, config).await,
+            "hourly_candy": crate::hourly::status(
+                state,
+                &crate::hourly::effective(config, &state.settings().await),
+            )
+            .await,
             "version": API_VERSION,
         }),
     )

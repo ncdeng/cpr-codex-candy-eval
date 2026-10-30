@@ -66,8 +66,8 @@ function previewCredential(value) {
 // CPA config identities match internal/watcher/synthesizer (including collisions).
 async function configuredCredentials(config, providerGroups) {
   const record = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-  if (!record(config)) throw new Error("CPA 凭证配置格式无效");
-  if (providerGroups != null && !record(providerGroups)) throw new Error("CPA 凭证分组格式无效");
+  if (!record(config)) throw new Error("CPR 账号配置格式无效");
+  if (providerGroups != null && !record(providerGroups)) throw new Error("CPR 账号分组格式无效");
   const credentials = [], counters = new Map();
   const text = (v) => String(v || "").trim();
   // CPA and CPAMC disable a config API key by excluding every model.
@@ -75,7 +75,7 @@ async function configuredCredentials(config, providerGroups) {
   const headers = (entry) => Object.keys(entry.headers || {}).sort().map((key) => key + "\0" + entry.headers[key] + "\0").join("");
   const entries = (field, value = config[field]) => {
     if (value == null) return [];
-    if (!Array.isArray(value) || !value.every(record)) throw new Error("CPA 凭证配置格式无效：" + field);
+    if (!Array.isArray(value) || !value.every(record)) throw new Error("CPR 账号配置格式无效：" + field);
     return value;
   };
   // v0 lists each provider's effective keys without their v8 group names. Pair keys by CPA's

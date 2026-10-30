@@ -36,7 +36,7 @@ async fn run_contract(key_case: KeyCase) -> (Value, usize, bool) {
     let handshake = Handshake {
         protocol_version: PROTOCOL_VERSION,
         artifact_sha256: "test-artifact".into(),
-        plugin_id: "nmbb.codex-candy-eval".into(),
+        plugin_id: "ncdeng.codex-candy-eval".into(),
         instance_id: "test-instance".into(),
         generation: 1,
         incarnation: "test-incarnation".into(),

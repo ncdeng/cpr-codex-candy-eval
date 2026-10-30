@@ -21,7 +21,7 @@ import urllib.request
 
 BASE = Path('/opt/codex-proxy-rs')
 PG = 'codex-proxy-rs-postgres-1'
-PLUGIN = 'nmbb.codex-candy-eval'
+PLUGIN = 'ncdeng.codex-candy-eval'
 CONTEXT = ssl._create_unverified_context()  # Existing same-host TLS endpoint only.
 
 
@@ -129,7 +129,7 @@ def package_version(package):
     # Release version is read from the official artifact name so the deployed
     # identity check never depends on a hand-edited constant.
     match = re.fullmatch(
-        r'nmbb\.codex-candy-eval-(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)-x86_64-unknown-linux-gnu\.tar\.gz',
+        r'ncdeng.codex-candy-eval-(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)-x86_64-unknown-linux-gnu\.tar\.gz',
         package.name,
     )
     if not match:

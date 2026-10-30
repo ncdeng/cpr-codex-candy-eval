@@ -27,5 +27,9 @@
   ["DELETE", "api/pelican/results"],
   ["DELETE", "api/all/results"],
   ["POST", "api/inspection"],
-  ["GET", "api/inspection"]
+  ["GET", "api/inspection"],
+  ["POST", "api/notify/test"],
+  ["GET", "api/settings"],
+  ["POST", "api/settings"],
+  ["POST", "api/schedule/run"]
 ]

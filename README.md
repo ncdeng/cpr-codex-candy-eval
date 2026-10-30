@@ -1,3 +1,45 @@
+# CPR Codex 降智测试插件（ncdeng 版）
+
+CPR（codex-proxy-rs）用的 Codex 账号降智测试插件：糖果题、鹈鹕画图、ModelTrace、模型指纹。
+本仓库基于 [ziangbuchu/cpr-plugin-codex-candy-eval-fixed](https://github.com/ziangbuchu/cpr-plugin-codex-candy-eval-fixed)
+的提交 `2dbd595`，再往上是 [haowang02/cpa-plugin-codex-candy-eval](https://github.com/haowang02/cpa-plugin-codex-candy-eval)。
+许可为 MIT，原作者署名保留在 [LICENSE](LICENSE) 和 [NOTICE.md](NOTICE.md)。
+
+## 这个版本加了什么
+
+- **总览页**：每个账号一张卡片，显示最近一张鹈鹕画、糖果题结果和降智判定；可以搜索、按判定筛选、立即测一轮。页面不再限制宽度。
+- **定时测试**：在总览页设置间隔（30 分钟到 24 小时）和测试项（糖果题、鹈鹕画图、快速指纹）。
+- **降智判定和邮件通知**：只看糖果题。每轮至少答对几次算正常、连续几轮一致才改状态，都可以设置。状态变化时通过 SMTP（465 或 587）发邮件。
+- **每个账号自有的测试分组和 Key**：不填共享测试 Key 时，插件为每个账号建一个只含该账号的分组和 Key，测试请求只会由这个账号回答，结果不会记错账号。
+- **模型目录按账号查**：不再依赖“第一个启用的 Key”能看到哪些模型。
+- **兼容 CPR 3.33 到 3.36**（插件协议 7）。
+
+SMTP 授权码只放在 CPR 插件设置的加密敏感字段里，页面不经手。
+
+## 安装和更新
+
+- **第一次安装**：CPR「插件管理」→ 安装 → GitHub，填 `ncdeng/cpr-codex-candy-eval`，标签留空即装最新稳定版。
+- **已经装过（上传包装的）**：打开插件详情，把更新来源改成 GitHub、仓库填上面这个、策略选「最新稳定版」。以后点「检查更新」→ 更新 → 确认切换。
+
+每个 Release 附带安装包 `ncdeng.codex-candy-eval-<版本>-x86_64-unknown-linux-gnu.tar.gz` 和 `checksums.txt`。
+
+## 构建
+
+插件程序要能在 CPR 官方镜像（Debian 12，glibc 2.36）里运行，所以在 `rust:1-bookworm` 容器里编译：
+
+```bash
+node tools/build-page.mjs .
+cargo build --locked --release
+cpr-plugin package --manifest plugin.json   --binary target/release/codex-proxy-plugin-candy-eval   --target x86_64-unknown-linux-gnu   --resource-map "web=build/resources-<版本>/web" --output-dir dist
+```
+
+`cpr-plugin` 来自 CPR 源码 `backend/apps/plugin-cli`（用与 `Cargo.toml` 里 SDK 相同的标签编译）。
+原作者的部分集成测试按旧版插件协议编写，在 SDK 3.35.1 上有 20 条固定失败，与本版本的改动无关。
+
+---
+
+以下是上游移植版的原 README。
+
 # CPR Codex 糖果自检插件
 
 **CPR（codex-proxy-rs）原生 Rust 插件**：把 CPA 平台上的 [`cpa-plugin-codex-candy-eval`](https://github.com/haowang02/cpa-plugin-codex-candy-eval)（Go + CGO 动态库）的检测能力，重写为运行在 CPR `gateway-plugin-sdk` 上的独立子进程插件，用于自查 Codex 账号是否“降智”、模型指纹是否被替换、以及模型在长输出与指令遵循上的退化。
@@ -76,7 +118,7 @@ node tests/check-page.mjs .
 
 # 构建并打包离线制品（自动跑 fmt/test/页面校验/内联打包/release 构建）
 bash tools/package-release.sh
-# 输出：dist/native-<version>/nmbb.codex-candy-eval-<version>-x86_64-unknown-linux-gnu.tar.gz
+# 输出：dist/native-<version>/ncdeng.codex-candy-eval-<version>-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 ### 浏览器布局回归（v1.0.10）

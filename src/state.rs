@@ -41,6 +41,12 @@ struct Inner {
     inspection: serde_json::Value,
     hourly_candy_at: i64,
     hourly_dispatch: serde_json::Value,
+    /// 每个账号的降智判定，随历史一起持久化。
+    verdicts: BTreeMap<String, Verdict>,
+    /// 页面保存的定时与邮件设置，随历史一起持久化。
+    settings: serde_json::Map<String, serde_json::Value>,
+    /// 本轮定时测试中还没提交的套件；同一账号同时只能跑一个套件，所以按顺序逐个提交。重启不补跑。
+    schedule_queue: Vec<String>,
     /// 读取到损坏状态时暂停保存，避免覆盖用户原文件。
     load_error: Option<String>,
     storage_error: String,
@@ -125,6 +131,14 @@ fn clear_owned_run(inner: &mut Inner, id: &str, token: &Arc<()>) {
     inner.leases.remove(id);
 }
 
+fn busy_locked(inner: &Inner, id: &str) -> bool {
+    inner.leases.contains_key(id)
+        || inner.running.contains_key(id)
+        || inner.pelican_running.contains(id)
+        || inner.fingerprint_running.contains_key(id)
+        || inner.trace_running.contains_key(id)
+}
+
 impl StateManager {
     pub fn new() -> Self {
         Self {
@@ -186,6 +200,8 @@ impl StateManager {
                 inner.fingerprints = state.fingerprints;
                 inner.traces = state.traces;
                 inner.hourly_candy_at = state.hourly_candy_at;
+                inner.verdicts = state.verdicts;
+                inner.settings = state.settings;
                 for history in inner.results.values_mut() {
                     trim(history);
                 }
@@ -237,6 +253,9 @@ impl StateManager {
             fingerprints: inner.fingerprints.clone(),
             traces: inner.traces.clone(),
             hourly_candy_at: inner.hourly_candy_at.max(incoming.hourly_candy_at),
+            // 恢复只合并历史；判定和设置以本实例当前状态为准。
+            verdicts: inner.verdicts.clone(),
+            settings: inner.settings.clone(),
         };
         merge_histories(&mut merged.results, incoming.results)?;
         merge_histories(&mut merged.pelicans, incoming.pelicans)?;
@@ -448,20 +467,209 @@ impl StateManager {
     }
 
     /// Claim once, before making model requests. Failed saves prohibit dispatch.
-    pub async fn claim_hourly_candy(&self, now: i64) -> Option<u64> {
+    /// The claimed slot queues the selected suites; they are submitted one by one.
+    pub async fn claim_hourly_candy(
+        &self,
+        now: i64,
+        interval: i64,
+        suites: Vec<String>,
+    ) -> Option<u64> {
         let mut inner = self.inner.write().await;
         if !inner.loaded
             || inner.load_error.is_some()
             || !inner.storage_error.is_empty()
             || now <= 0
-            || !crate::hourly::due(inner.hourly_candy_at, now)
+            || suites.is_empty()
+            || !crate::hourly::due(inner.hourly_candy_at, now, interval)
         {
             return None;
         }
         inner.hourly_candy_at = now;
         inner.hourly_dispatch = serde_json::json!({"status":"starting"});
+        inner.schedule_queue = suites;
         inner.revision += 1;
         Some(inner.revision)
+    }
+
+    /// 页面里点「立即测一轮」：不等间隔，直接排上选中的套件；上一轮还没提交完时拒绝。
+    pub async fn claim_now(&self, now: i64, suites: Vec<String>) -> Option<u64> {
+        let mut inner = self.inner.write().await;
+        if !inner.loaded
+            || inner.load_error.is_some()
+            || !inner.storage_error.is_empty()
+            || now <= 0
+            || suites.is_empty()
+            || !inner.schedule_queue.is_empty()
+        {
+            return None;
+        }
+        inner.hourly_candy_at = now;
+        inner.hourly_dispatch = serde_json::json!({"status":"starting"});
+        inner.schedule_queue = suites;
+        inner.revision += 1;
+        Some(inner.revision)
+    }
+
+    pub async fn settings(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.inner.read().await.settings.clone()
+    }
+
+    /// 保存页面设置并等它写进宿主存储；写失败时返回原因。
+    pub async fn save_settings(
+        &self,
+        host: &HostClient,
+        settings: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        let revision = {
+            let mut inner = self.inner.write().await;
+            if let Some(error) = inner.load_error.clone() {
+                return Err(error);
+            }
+            if !inner.loaded {
+                return Err("测试记录还没读取完成，请稍后再保存".to_owned());
+            }
+            inner.settings = settings;
+            inner.revision += 1;
+            inner.revision
+        };
+        self.persist(host).await;
+        if self.revision_committed(revision).await {
+            Ok(())
+        } else {
+            Err(self.inner.read().await.storage_error.clone())
+        }
+    }
+
+    /// 取出下一个待提交的定时套件；有账号仍在测试时先等待，避免它被当成忙碌跳过。
+    pub async fn next_scheduled_suite(&self) -> Option<String> {
+        let mut inner = self.inner.write().await;
+        if inner.schedule_queue.is_empty() {
+            return None;
+        }
+        let busy = inner
+            .credentials
+            .keys()
+            .any(|id| busy_locked(&inner, id));
+        if busy {
+            return None;
+        }
+        Some(inner.schedule_queue.remove(0))
+    }
+
+    pub async fn clear_schedule_queue(&self) {
+        self.inner.write().await.schedule_queue.clear();
+    }
+
+    pub async fn schedule_queue(&self) -> Vec<String> {
+        self.inner.read().await.schedule_queue.clone()
+    }
+
+    /// 记录定时糖果轮次，等这些账号跑完后再结算。
+    pub async fn start_rounds(&self, host: &HostClient, ids: &[String], round: PendingRound) {
+        if ids.is_empty() {
+            return;
+        }
+        {
+            let mut inner = self.inner.write().await;
+            for id in ids {
+                inner.verdicts.entry(id.clone()).or_default().round = Some(round.clone());
+            }
+            inner.revision += 1;
+        }
+        self.persist(host).await;
+    }
+
+    pub async fn has_pending_rounds(&self) -> bool {
+        self.inner
+            .read()
+            .await
+            .verdicts
+            .values()
+            .any(|verdict| verdict.round.is_some())
+    }
+
+    /// 结算已跑完的定时轮次；状态改变时按需排队通知邮件。
+    pub async fn settle_rounds(&self, host: &HostClient, rule: &crate::hourly::JudgeRule) {
+        let changed = {
+            let mut inner = self.inner.write().await;
+            let ids: Vec<String> = inner
+                .verdicts
+                .iter()
+                .filter(|(_, verdict)| verdict.round.is_some())
+                .map(|(id, _)| id.clone())
+                .collect();
+            let mut changed = false;
+            for id in ids {
+                if busy_locked(&inner, &id) {
+                    continue;
+                }
+                let label = inner
+                    .credentials
+                    .get(&id)
+                    .map(crate::hourly::label)
+                    .unwrap_or_else(|| id.clone());
+                let history = inner.results.get(&id).cloned().unwrap_or_default();
+                let verdict = inner.verdicts.entry(id.clone()).or_default();
+                let Some(round) = verdict.round.take() else {
+                    continue;
+                };
+                crate::hourly::settle(verdict, &round, &history, rule, &label);
+                changed = true;
+            }
+            if changed {
+                inner.revision += 1;
+            }
+            changed
+        };
+        if changed {
+            self.persist(host).await;
+        }
+    }
+
+    /// 到了重试时间的待发邮件。
+    pub async fn due_mails(&self, now: i64) -> Vec<(String, PendingMail)> {
+        self.inner
+            .read()
+            .await
+            .verdicts
+            .iter()
+            .filter_map(|(id, verdict)| {
+                verdict
+                    .mail
+                    .as_ref()
+                    .filter(|mail| mail.next_at <= now)
+                    .map(|mail| (id.clone(), mail.clone()))
+            })
+            .collect()
+    }
+
+    /// 记录发信结果：成功或放弃时清掉待发邮件，失败时退避重试。
+    pub async fn mail_result(&self, host: &HostClient, id: &str, outcome: crate::hourly::MailOutcome, now: i64) {
+        {
+            let mut inner = self.inner.write().await;
+            let Some(verdict) = inner.verdicts.get_mut(id) else {
+                return;
+            };
+            crate::hourly::apply_mail_outcome(verdict, outcome, now);
+            inner.revision += 1;
+        }
+        self.persist(host).await;
+    }
+
+    /// 页面展示用：每个已知账号的显示名和判定。
+    pub async fn verdict_views(&self) -> Vec<(String, String, Verdict)> {
+        let inner = self.inner.read().await;
+        inner
+            .credentials
+            .iter()
+            .map(|(id, credential)| {
+                (
+                    id.clone(),
+                    crate::hourly::label(credential),
+                    inner.verdicts.get(id).cloned().unwrap_or_default(),
+                )
+            })
+            .collect()
     }
 
     pub async fn revision_committed(&self, revision: u64) -> bool {
@@ -479,12 +687,7 @@ impl StateManager {
 
     /// 某凭证是否已有测试在进行中。
     pub async fn busy(&self, id: &str) -> bool {
-        let inner = self.inner.read().await;
-        inner.leases.contains_key(id)
-            || inner.running.contains_key(id)
-            || inner.pelican_running.contains(id)
-            || inner.fingerprint_running.contains_key(id)
-            || inner.trace_running.contains_key(id)
+        busy_locked(&*self.inner.read().await, id)
     }
 
     /// 追加糖果记录并立即持久化。
@@ -604,6 +807,8 @@ impl StateManager {
                 fingerprints: inner.fingerprints.clone(),
                 traces: inner.traces.clone(),
                 hourly_candy_at: inner.hourly_candy_at,
+                verdicts: inner.verdicts.clone(),
+                settings: inner.settings.clone(),
             };
             let mut value = serde_json::to_value(&state).unwrap_or_default();
             // 超限时反复丢弃最长的历史中最早的一条记录，直到落在配额内。

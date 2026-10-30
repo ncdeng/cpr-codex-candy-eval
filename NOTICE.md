@@ -7,6 +7,7 @@
 | 项目 | 地址 | 许可 | 本仓库如何使用 |
 | --- | --- | --- | --- |
 | `cpa-plugin-codex-candy-eval`（Go/CGO 动态库插件） | https://github.com/haowang02/cpa-plugin-codex-candy-eval | MIT，Copyright (c) 2026 Hao Wang | 功能语义、判定规则、页面交互与题面口径的原型；本仓库为 CPR 平台用 Rust 重写，并在此基础上修改 |
+| `cpr-plugin-codex-candy-eval-fixed`（CPR 原生 Rust 移植版） | https://github.com/ziangbuchu/cpr-plugin-codex-candy-eval-fixed ，提交 `2dbd59528b623bcafc14061795f9cf92f6bde3ae` | MIT | 本仓库的直接基础；ncdeng 版在其上加了总览页、定时测试、降智判定与邮件通知、每账号自有测试 Key、按账号读取模型目录等修改 |
 
 上游 MIT 许可与版权声明完整保留在根目录 [LICENSE](LICENSE)。
 
