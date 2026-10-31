@@ -343,7 +343,50 @@ fn to_credential(
         disabled: !account.enabled,
         unavailable: false,
         status_message: String::new(),
+        status_label: String::new(),
+        next_retry_after: String::new(),
     }
+}
+
+/// CPR 账号状态：额度用完。CPR 在额度重置后自己复核，复核通过才改回 `normal`。
+const QUOTA_EXHAUSTED: &str = "quota_exhausted";
+
+/// 额度用完的账号标为不可用：页面按钮变灰，手动和定时测试都跳过它，等 CPR 刷新额度后自动恢复。
+fn mark_quota_exhausted(credential: &mut crate::model::Credential, reset_at: Option<String>) {
+    credential.unavailable = true;
+    credential.status_label = "额度用完".to_owned();
+    credential.status_message = "额度已用完，CPR 刷新额度前不测试".to_owned();
+    credential.next_retry_after = reset_at.unwrap_or_default();
+}
+
+/// 预计恢复时间：已触顶的额度窗口里最晚的重置时间；没有未来的重置时间时返回 `None`。
+/// Codex 上游通常只在整个限额上标触顶、窗口上不标，所以用量到 100% 的窗口也算触顶。
+fn quota_reset_at(
+    details: &gateway_plugin_sdk::call::data::QuotaDetails,
+    now_ms: i64,
+) -> Option<String> {
+    details
+        .windows
+        .iter()
+        .filter(|window| {
+            window.limit_reached || window.used_percent.is_some_and(|used| used >= 100.0)
+        })
+        .filter_map(|window| window.reset_at_ms)
+        .filter(|reset| *reset > now_ms)
+        .max()
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+        .map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+
+/// 读 CPR 已有的额度观测（不触发上游刷新）；读取失败时不显示恢复时间。
+async fn quota_reset(host: &HostClient, account_id: &str) -> Option<String> {
+    let details = host
+        .quota_details(gateway_plugin_sdk::call::data::QuotaFactsQuery {
+            account_id: account_id.to_owned(),
+        })
+        .await
+        .ok()?;
+    quota_reset_at(&details, chrono::Utc::now().timestamp_millis())
 }
 
 pub(crate) async fn refresh_credentials(
@@ -358,19 +401,21 @@ pub(crate) async fn refresh_credentials(
         )
     })?;
     let count = accounts.len();
-    let plans = plan_types(host).await;
-    state
-        .set_credentials(
-            accounts
-                .iter()
-                .map(|account| {
-                    let mut credential = to_credential(account);
-                    credential.plan_type = plans.get(&credential.id).cloned().unwrap_or_default();
-                    credential
-                })
-                .collect(),
-        )
-        .await;
+    let admin = admin_accounts(host).await;
+    let mut credentials = Vec::with_capacity(count);
+    for account in &accounts {
+        let mut credential = to_credential(account);
+        if let Some(info) = admin.get(&credential.id) {
+            credential.plan_type = info.plan_type.clone().unwrap_or_default();
+            // 读不到状态时按可用处理，不因管理接口异常挡住测试。
+            if !credential.disabled && info.status.as_deref() == Some(QUOTA_EXHAUSTED) {
+                let reset_at = quota_reset(host, &credential.id).await;
+                mark_quota_exhausted(&mut credential, reset_at);
+            }
+        }
+        credentials.push(credential);
+    }
+    state.set_credentials(credentials).await;
     Ok(count)
 }
 
@@ -430,15 +475,18 @@ struct AdminAccount {
     id: String,
     #[serde(default)]
     plan_type: Option<String>,
+    /// CPR 五态账号状态：normal / quota_exhausted / rate_limited / disabled / error。
+    #[serde(default)]
+    status: Option<String>,
 }
 #[derive(Deserialize)]
 struct AdminAccountPage {
     items: Vec<AdminAccount>,
 }
 
-/// 账号套餐：宿主回调的账号事实不带套餐，从 CPR 管理端账号列表补上；读取失败时不显示套餐。
-async fn plan_types(host: &HostClient) -> BTreeMap<String, String> {
-    let mut plans = BTreeMap::new();
+/// 账号套餐和状态：宿主回调的账号事实不带这两项，从 CPR 管理端账号列表补上；读取失败时都不显示。
+async fn admin_accounts(host: &HostClient) -> BTreeMap<String, AdminAccount> {
+    let mut accounts = BTreeMap::new();
     for page in 1..=10u32 {
         let page_text = page.to_string();
         let Ok(data) = crate::background_transport::admin::<AdminAccountPage>(
@@ -453,16 +501,16 @@ async fn plan_types(host: &HostClient) -> BTreeMap<String, String> {
             break;
         };
         let count = data.items.len();
-        plans.extend(
+        accounts.extend(
             data.items
                 .into_iter()
-                .filter_map(|account| account.plan_type.map(|plan| (account.id, plan))),
+                .map(|account| (account.id.clone(), account)),
         );
         if count < 100 {
             break;
         }
     }
-    plans
+    accounts
 }
 
 /// 控制台读取的配置形状；账号来自 CPR 宿主，因此这里不带 CPA 凭证。
@@ -548,7 +596,8 @@ pub(crate) fn select(
             skipped.push(id);
             continue;
         };
-        if credential.disabled {
+        // 额度用完等暂不可用的账号请求必然失败，跳过，等 CPR 恢复后再测。
+        if credential.disabled || credential.unavailable {
             skipped.push(id);
             continue;
         }
@@ -902,7 +951,79 @@ mod tests {
             disabled,
             unavailable: false,
             status_message: String::new(),
+            status_label: String::new(),
+            next_retry_after: String::new(),
         }
+    }
+
+    #[test]
+    fn quota_exhausted_accounts_are_skipped_until_cpr_recovers_them() {
+        let mut exhausted = credential("b", false);
+        mark_quota_exhausted(&mut exhausted, Some("2026-11-01T03:00:00Z".to_owned()));
+        assert!(exhausted.unavailable);
+        assert_eq!(exhausted.status_label, "额度用完");
+        assert_eq!(exhausted.next_retry_after, "2026-11-01T03:00:00Z");
+        let credentials = vec![credential("a", false), exhausted];
+        let request = RunRequest {
+            all: true,
+            ..RunRequest::default()
+        };
+        let (started, skipped, _) = select(&credentials, &request);
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].id, "a");
+        assert_eq!(skipped, vec!["b".to_owned()]);
+    }
+
+    #[test]
+    fn quota_reset_uses_the_latest_future_reset_of_reached_windows() {
+        use gateway_plugin_sdk::call::data::{QuotaDetails, QuotaWindowDetails};
+        let window = |reset: Option<i64>, reached: bool| QuotaWindowDetails {
+            key: "w".to_owned(),
+            group: "g".to_owned(),
+            label: "l".to_owned(),
+            limit_id: None,
+            limit_name: None,
+            role: None,
+            window_seconds: None,
+            used_percent: None,
+            reset_at_ms: reset,
+            limit_reached: reached,
+        };
+        let used = |reset: i64, percent: f64| QuotaWindowDetails {
+            used_percent: Some(percent),
+            ..window(Some(reset), false)
+        };
+        let details = |windows| QuotaDetails {
+            schema_version: 1,
+            account_id: "a".to_owned(),
+            observed_at_ms: None,
+            limit_reached: true,
+            windows,
+            credits: None,
+        };
+        let now = 1_000_000;
+        let reset = quota_reset_at(
+            &details(vec![
+                window(Some(now + 5_000), true),
+                window(Some(now + 90_000), true),
+                // 没触顶的窗口不决定恢复时间。
+                window(Some(now + 900_000), false),
+            ]),
+            now,
+        );
+        assert_eq!(
+            reset,
+            chrono::DateTime::<chrono::Utc>::from_timestamp_millis(now + 90_000)
+                .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        );
+        // 实际数据形状：窗口不标触顶，5 小时窗口用到 100%，周窗口 20%；恢复时间取 5 小时窗口的。
+        assert_eq!(
+            quota_reset_at(&details(vec![used(now + 7_400_000, 100.0), used(now + 354_381_000, 20.0)]), now),
+            chrono::DateTime::<chrono::Utc>::from_timestamp_millis(now + 7_400_000)
+                .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        );
+        // 重置时间已过（CPR 还没复核）或未知时，不显示恢复时间。
+        assert_eq!(quota_reset_at(&details(vec![window(Some(now - 1), true), window(None, true)]), now), None);
     }
 
     #[test]

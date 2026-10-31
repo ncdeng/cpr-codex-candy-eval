@@ -103,7 +103,7 @@ function credentialView(a, open) {
   const label = configured ? a.base_url?.replace(/^https:\/\//i, "") || "默认地址" : a.email || a.name;
   return `<div class="credential"><button class="toggle" type="button" data-toggle="${esc(a.id)}" aria-expanded="${open}">${icon("chevron-right", "chev")}<span class="name">${esc(label)}</span></button>
     ${configured ? `<div class="api-key name mono">${esc(a.name)}</div>` : ""}
-    <div class="tags"><span class="tag" aria-label="${esc(credentialTypeLabel(credentialType(a)))}" data-tip>${icon(a.source === "auth_files" ? "file-key" : "key")}<span>${esc(providerType(a))}</span></span>${a.provider_name ? `<span class="tag"><span>${esc(a.provider_name)}</span></span>` : ""}${plan ? `<span class="tag ${plan.badge ? "plan-" + plan.badge : ""}"><span>${esc(plan.label)}</span></span>` : ""}${a.unavailable ? `<span class="tag warn" data-tip="${esc(unavailableReason(a))}"><span>不可用</span></span>` : ""}</div></div>`;
+    <div class="tags"><span class="tag" aria-label="${esc(credentialTypeLabel(credentialType(a)))}" data-tip>${icon(a.source === "auth_files" ? "file-key" : "key")}<span>${esc(providerType(a))}</span></span>${a.provider_name ? `<span class="tag"><span>${esc(a.provider_name)}</span></span>` : ""}${plan ? `<span class="tag ${plan.badge ? "plan-" + plan.badge : ""}"><span>${esc(plan.label)}</span></span>` : ""}${a.unavailable ? `<span class="tag warn" data-tip="${esc(unavailableReason(a))}"><span>${esc(a.status_label || "不可用")}</span></span>` : ""}</div></div>`;
 }
 function unavailableReason(a) {
   const retry = a.next_retry_after && `预计 ${fmtTime(a.next_retry_after, false)} 恢复`;

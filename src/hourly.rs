@@ -1,4 +1,5 @@
 //! 定时测试：按设置的间隔和套件逐个提交后台测试，用糖果题结果判定降智，状态变化时发邮件。
+//! CPR 标为额度用完的账号在提交时跳过，不开新一轮判定，等 CPR 刷新额度后自动恢复。
 //! Dispatch uses only fresh official maintenance scopes; model work is detached.
 use crate::{
     background, management,
@@ -499,9 +500,24 @@ async fn dispatch_next(state: &Arc<StateManager>, host: &HostClient, config: &Va
     let dispatch = match background::submit(state, host, config, path, body.to_string().as_bytes()).await {
         Ok(reply) if reply.result.status == 202 => {
             let reply = serde_json::from_slice::<Value>(&reply.payload).unwrap_or_default();
+            // 提交时刚按 CPR 状态刷新过账号；被跳过且不可用的就是额度用完的。
+            let unavailable: std::collections::BTreeSet<String> = state
+                .credentials()
+                .await
+                .into_iter()
+                .filter(|credential| credential.unavailable)
+                .map(|credential| credential.id)
+                .collect();
+            let exhausted = reply["skipped"].as_array().map_or(0, |ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .filter(|id| unavailable.contains(*id))
+                    .count()
+            });
             json!({"status":"dispatched", "suite":suite, "started":reply["started"],
                 "busy":reply["busy"].as_array().map_or(0, Vec::len),
-                "skipped":reply["skipped"].as_array().map_or(0, Vec::len)})
+                "skipped":reply["skipped"].as_array().map_or(0, Vec::len),
+                "exhausted":exhausted})
         }
         _ => json!({"status":"dispatch_error", "suite":suite}),
     };

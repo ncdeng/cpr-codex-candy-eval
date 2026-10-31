@@ -33,6 +33,12 @@ pub struct Credential {
     pub unavailable: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub status_message: String,
+    /// 不可用时卡片标签上的短名，例如「额度用完」；空时页面显示「不可用」。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub status_label: String,
+    /// 预计恢复时间（RFC 3339）；页面显示「预计 … 恢复」。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub next_retry_after: String,
 }
 
 fn is_false(value: &bool) -> bool {

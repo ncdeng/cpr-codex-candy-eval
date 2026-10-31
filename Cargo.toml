@@ -1,6 +1,6 @@
 [package]
 name = "codex-proxy-plugin-candy-eval"
-version = "1.10.2"
+version = "1.11.0"
 edition = "2021"
 
 [lib]

@@ -57,7 +57,9 @@ function ovStatus(a) {
   const times = [a.results?.at(-1)?.time, a.pelicans?.at(-1)?.time].filter(Boolean).sort();
   const latest = times.at(-1), pelican = a.pelicans?.at(-1);
   const duration = pelican?.duration_ms ? `<span class="ov-right meta mono">鹈鹕 ${fmtSec(pelican.duration_ms)}</span>` : "";
-  return `<div class="ov-line"><span class="ov-led ${latest ? "on" : ""}"></span><span>${latest ? `最近测试 ${esc(fmtTime(latest, false))}` : "还没测过"}</span>${duration}</div>`;
+  // 额度用完等暂不可用时，插件不测这个账号；写明原因和预计恢复时间。
+  const why = !a.disabled && a.unavailable ? `<div class="ov-line warn">${icon("circle-alert")}<span>${esc(unavailableReason(a).replace(/\n/g, "，"))}</span></div>` : "";
+  return `<div class="ov-line"><span class="ov-led ${latest ? "on" : ""}"></span><span>${latest ? `最近测试 ${esc(fmtTime(latest, false))}` : "还没测过"}</span>${duration}</div>${why}`;
 }
 
 function ovCandy(a) {
@@ -83,7 +85,7 @@ function ovJudge(a) {
 }
 
 function ovActions(a) {
-  const blocked = !usableCredential(a) ? "账号已停用或不可用" : credentialBusy(a) ? `${busyTest(a)}进行中` : pending ? "正在处理上一个操作" : "";
+  const blocked = a.disabled ? "账号已停用" : a.unavailable ? unavailableReason(a) : credentialBusy(a) ? `${busyTest(a)}进行中` : pending ? "正在处理上一个操作" : "";
   const off = blocked ? `disabled data-tip="${esc(blocked)}"` : "";
   const tested = (a.results?.length || 0) + (a.pelicans?.length || 0);
   return `<div class="ov-actions">
@@ -96,7 +98,7 @@ function ovActions(a) {
 function ovCard(a) {
   const plan = ovPlan(a), state = ovVerdict(a.id)?.state || "";
   return `<article class="ov-card card ${state ? "is-" + state : ""} ${a.disabled ? "is-off" : ""}" data-ov-card="${esc(a.id)}">
-    <div class="ov-head">${plan ? `<span class="tag ${plan.badge ? "plan-" + plan.badge : ""}"><span>${esc(plan.label)}</span></span>` : ""}<span class="ov-name name" data-tip="${esc(ovLabel(a))}">${esc(ovLabel(a))}</span>${a.disabled ? `<span class="tag warn"><span>已停用</span></span>` : a.unavailable ? `<span class="tag warn" data-tip="${esc(unavailableReason(a))}"><span>不可用</span></span>` : ""}${ovSkipped(a.id) ? `<span class="tag" data-tip="在「定时与通知设置」里取消了勾选，定时测试跳过这个账号"><span>不参与定时</span></span>` : ""}</div>
+    <div class="ov-head">${plan ? `<span class="tag ${plan.badge ? "plan-" + plan.badge : ""}"><span>${esc(plan.label)}</span></span>` : ""}<span class="ov-name name" data-tip="${esc(ovLabel(a))}">${esc(ovLabel(a))}</span>${a.disabled ? `<span class="tag warn"><span>已停用</span></span>` : a.unavailable ? `<span class="tag warn" data-tip="${esc(unavailableReason(a))}"><span>${esc(a.status_label || "不可用")}</span></span>` : ""}${ovSkipped(a.id) ? `<span class="tag" data-tip="在「定时与通知设置」里取消了勾选，定时测试跳过这个账号"><span>不参与定时</span></span>` : ""}</div>
     ${ovThumb(a)}${ovStrip(a)}
     <div class="ov-body">${ovStatus(a)}${ovCandy(a)}${ovJudge(a)}</div>
     ${ovActions(a)}

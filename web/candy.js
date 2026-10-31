@@ -16,7 +16,8 @@ function scheduleLine(h) {
   const skip = h.skip?.length ? ` · ${h.skip.length} 个账号不参与` : "";
   const candy = (h.suites || []).includes("candy") ? `糖果每轮 ${h.candy_runs} 次、答对 ≥ ${Math.min(h.pass_min, h.candy_runs)} 次算正常` : "没勾糖果题，定时测试不会判定降智";
   const empty = h.last_dispatch?.status === "no_accounts" ? " · 没有参与的账号" : "";
-  return `定时测试 · 每 ${fmtInterval(h.interval_seconds)} · ${suites} · ${h.model} / ${h.effort} · ${candy}${skip} · ${last}${due}${queued}${warning}${empty}`;
+  const exhausted = h.last_dispatch?.exhausted ? ` · 上次有 ${h.last_dispatch.exhausted} 个账号额度用完，已跳过` : "";
+  return `定时测试 · 每 ${fmtInterval(h.interval_seconds)} · ${suites} · ${h.model} / ${h.effort} · ${candy}${skip} · ${last}${due}${queued}${warning}${empty}${exhausted}`;
 }
 
 function verdictLine(v) {

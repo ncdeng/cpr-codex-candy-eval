@@ -454,7 +454,8 @@ dialog[open] { position: fixed; inset: auto; top: var(--dialog-top, 50%); left: 
 .ov-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .ov-line .icon { width: 13px; height: 13px; flex: none; }
 .ov-line.muted { color: var(--faint); }
-.ov-line.warn { color: var(--warning-ink); }
+.ov-line.warn { color: var(--warning-ink); flex-wrap: nowrap; align-items: flex-start; }
+.ov-line.warn .icon { margin-top: 3px; }
 .ov-line.running { color: var(--accent-ink, var(--accent)); }
 .ov-right { margin-left: auto; }
 .ov-led { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }

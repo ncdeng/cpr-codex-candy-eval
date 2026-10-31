@@ -81,6 +81,8 @@ mod tests {
             disabled,
             unavailable: false,
             status_message: String::new(),
+            status_label: String::new(),
+            next_retry_after: String::new(),
         }
     }
 
