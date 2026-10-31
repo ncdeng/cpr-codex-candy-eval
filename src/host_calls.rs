@@ -20,8 +20,11 @@ use serde::{de::DeserializeOwned, Serialize};
 
 /// 单次探测的读取上限，防止异常上游把整段流堆进内存。
 const MAXIMUM_STREAM_BYTES: usize = 8 * 1024 * 1024;
-/// 单次读取分块上限，宿主自身也有更小的硬上限。
+/// 单次读取分块大小。一个事件可能比它大（例如回显长提示词的 response.created），
+/// CPR 这时报「exceeds the requested read size」并保留该事件，于是按倍数放大重读，
+/// 最大到 CPR 默认的回调载荷上限 1 MiB。
 const STREAM_CHUNK_BYTES: u32 = 64 * 1024;
+const STREAM_CHUNK_MAX_BYTES: u32 = 1024 * 1024;
 /// CPR 的 OpenAI Responses 协议标识；宿主与 Provider 均以 `openai` 为准。
 const OPENAI_PROTOCOL: &str = "openai";
 
@@ -316,18 +319,29 @@ async fn read_stream(
 ) -> Result<ModelAnswer, ModelError> {
     let mut sse = Vec::new();
     let mut closed = false;
+    let mut chunk = STREAM_CHUNK_BYTES;
     for _ in 0..4096 {
-        let reply = host
+        let reply = match host
             .call(
                 "host.model.stream_read",
                 serde_json::json!({
                     "stream": stream,
-                    "maximum_bytes": STREAM_CHUNK_BYTES,
+                    "maximum_bytes": chunk,
                 }),
                 Vec::new(),
             )
             .await
-            .map_err(|error| ModelError::host(SessionError::into_plugin_fault(error)))?;
+        {
+            Ok(reply) => reply,
+            Err(error) => {
+                let fault = SessionError::into_plugin_fault(error);
+                if event_too_large(&fault) && chunk < STREAM_CHUNK_MAX_BYTES {
+                    chunk = (chunk * 4).min(STREAM_CHUNK_MAX_BYTES);
+                    continue;
+                }
+                return Err(ModelError::host(fault));
+            }
+        };
         let result: ModelStreamReadResult = serde_json::from_value(reply.result)
             .map_err(|_| ModelError::other(ModelFailure::Host, "模型响应流返回了无效响应"))?;
         if !reply.payload.is_empty() {
@@ -355,6 +369,10 @@ async fn read_stream(
         ));
     }
     parse_response(&sse, started)
+}
+
+fn event_too_large(fault: &PluginFault) -> bool {
+    fault.code == ErrorCode::Capacity && fault.message.contains("exceeds the requested read size")
 }
 
 /// 把事件中的原始 SSE 字节追加到缓冲；无 raw_sse 时由解析后的字段重建帧。
@@ -760,6 +778,22 @@ mod tests {
         ]);
         let error = parse_response(&raw, Instant::now()).expect_err("工具调用应判定失败");
         assert_eq!(error.kind, ModelFailure::ToolCall);
+    }
+
+    #[test]
+    fn only_oversized_events_grow_the_read_size() {
+        assert!(event_too_large(&PluginFault::new(
+            ErrorCode::Capacity,
+            "model event exceeds the requested read size"
+        )));
+        assert!(!event_too_large(&PluginFault::new(
+            ErrorCode::Capacity,
+            "model stream capacity is exhausted"
+        )));
+        assert!(!event_too_large(&PluginFault::new(
+            ErrorCode::Cancelled,
+            "model event exceeds the requested read size"
+        )));
     }
 
     #[test]
