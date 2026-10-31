@@ -25,6 +25,9 @@ const MAXIMUM_STREAM_BYTES: usize = 8 * 1024 * 1024;
 /// 最大到 CPR 默认的回调载荷上限 1 MiB。
 const STREAM_CHUNK_BYTES: u32 = 64 * 1024;
 const STREAM_CHUNK_MAX_BYTES: u32 = 1024 * 1024;
+/// 读取次数上限只防死循环。流式输出往往一次只到一小段，几千 token 的回答就要读几千次，
+/// 真正的上限是 MAXIMUM_STREAM_BYTES。
+const MAXIMUM_STREAM_READS: usize = 1_000_000;
 /// CPR 的 OpenAI Responses 协议标识；宿主与 Provider 均以 `openai` 为准。
 const OPENAI_PROTOCOL: &str = "openai";
 
@@ -320,7 +323,7 @@ async fn read_stream(
     let mut sse = Vec::new();
     let mut closed = false;
     let mut chunk = STREAM_CHUNK_BYTES;
-    for _ in 0..4096 {
+    for _ in 0..MAXIMUM_STREAM_READS {
         let reply = match host
             .call(
                 "host.model.stream_read",
