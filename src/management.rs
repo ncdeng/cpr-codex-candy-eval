@@ -116,6 +116,9 @@ pub(crate) struct RunRequest {
     pub(crate) concurrency: u32,
     #[serde(default)]
     model_catalog: BTreeMap<String, Vec<String>>,
+    /// 糖果题跑完后按降智判定规则结算（定时测试和总览页的「测糖果」）。
+    #[serde(default)]
+    pub(crate) judge: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]

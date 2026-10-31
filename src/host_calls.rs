@@ -237,12 +237,25 @@ pub async fn execute_body(
     model: &str,
     body: &serde_json::Value,
 ) -> Result<ModelAnswer, ModelError> {
+    let key_id = execution_key(host).await.map_err(ModelError::host)?;
+    execute_body_with_key(host, key_id, account_id, provider, model, body).await
+}
+
+/// 同 [`execute_body`]，但用调用方选好的 Key 编号；该 Key 的分组必须包含这个账号。
+pub async fn execute_body_with_key(
+    host: &HostClient,
+    key_id: String,
+    account_id: &str,
+    provider: &str,
+    model: &str,
+    body: &serde_json::Value,
+) -> Result<ModelAnswer, ModelError> {
     let body = serde_json::to_vec(body)
         .map_err(|_| ModelError::other(ModelFailure::Host, "请求载荷无法序列化"))?;
     let started = Instant::now();
 
     let request = ModelExecuteRequest {
-        client_key_id: Some(execution_key(host).await.map_err(ModelError::host)?),
+        client_key_id: Some(key_id),
         model: model.to_owned(),
         protocol: OPENAI_PROTOCOL.to_owned(),
         operation: ModelOperation::Generate,

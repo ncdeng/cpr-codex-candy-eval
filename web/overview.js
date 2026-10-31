@@ -3,6 +3,9 @@
 // 设置存在插件自己的状态里；SMTP 授权码只留在 CPR 的加密敏感字段，本页只显示有没有填。
 
 const ovFilter = { search: "", state: "all" };
+// 每张卡片当前显示哪一张鹈鹕画（记录 ID）；没选就显示最新一张。
+const ovPick = new Map();
+const OV_STRIP = 6;
 let ovSettings = null;
 let ovSettingsDirty = false;
 let ovSettingsTouched = false;
@@ -25,11 +28,27 @@ function ovVisible() {
     .sort((x, y) => Number(!!x.disabled) - Number(!!y.disabled) || planRank(x) - planRank(y) || ovLabel(x).localeCompare(ovLabel(y)));
 }
 
+const ovSkipped = (id) => !!hourlyCandy?.skip?.includes(id);
+
 function ovThumb(a) {
-  const last = [...(a.pelicans || [])].reverse().find((r) => !r.error && !r.skipped);
-  if (last) return `<div class="ov-thumb">${pelicanPreview(a.id, last)}</div>`;
+  const history = a.pelicans || [];
+  const shown = history.find((r) => r.id === ovPick.get(a.id)) || [...history].reverse().find((r) => !r.error && !r.skipped);
+  if (shown) return `<div class="ov-thumb">${pelicanPreview(a.id, shown)}</div>`;
   const text = a.pelican_running ? `${icon("loader-circle", "spin")}正在画鹈鹕…` : "还没有鹈鹕画图";
   return `<div class="ov-thumb empty"><span>${text}</span></div>`;
+}
+
+// 缩略图下的时间条：最近几张鹈鹕画，点一下换到那一张；更早的在「历史」里。
+function ovStrip(a) {
+  const history = (a.pelicans || []).filter((r) => !r.skipped);
+  if (history.length < 2) return "";
+  const picked = ovPick.get(a.id) || [...history].reverse().find((r) => !r.error)?.id;
+  const chips = history.slice(-OV_STRIP).map((r) => {
+    const tip = `${fmtTime(r.time, false)} · ${r.error ? "未生成：" + r.error : modelName(r) + (r.duration_ms ? " · " + fmtSec(r.duration_ms) : "")}`;
+    return `<button class="ov-shot ${r.error ? "err" : ""} ${r.id === picked ? "on" : ""}" type="button" data-ov-pick="${esc(r.id)}" data-ov-id="${esc(a.id)}" data-tip="${esc(tip)}">${esc(fmtTime(r.time, false).slice(6))}</button>`;
+  }).join("");
+  const more = history.length > OV_STRIP ? `<button class="ov-shot more" type="button" data-ov-history="${esc(a.id)}" data-tip="查看全部 ${history.length} 张">+${history.length - OV_STRIP}</button>` : "";
+  return `<div class="ov-strip" aria-label="最近的鹈鹕画">${chips}${more}</div>`;
 }
 
 function ovStatus(a) {
@@ -51,7 +70,7 @@ function ovCandy(a) {
 
 function ovJudge(a) {
   const v = ovVerdict(a.id);
-  if (!v || (!v.state && !v.last && !v.pending)) return `<div class="ov-line muted">降智判定：还没有定时测试结果</div>`;
+  if (!v || (!v.state && !v.last && !v.pending)) return `<div class="ov-line muted">降智判定：还没有糖果题结果（点「测糖果」，或在定时测试里勾选糖果题）</div>`;
   const facts = [
     v.since ? `自 ${fmtTime(v.since, false)}` : "",
     v.last ? `上一轮答对 ${v.last.correct}/${v.last.answered}${v.last.failed ? `，出错 ${v.last.failed}` : ""}` : "",
@@ -66,17 +85,19 @@ function ovJudge(a) {
 function ovActions(a) {
   const blocked = !usableCredential(a) ? "账号已停用或不可用" : credentialBusy(a) ? `${busyTest(a)}进行中` : pending ? "正在处理上一个操作" : "";
   const off = blocked ? `disabled data-tip="${esc(blocked)}"` : "";
+  const tested = (a.results?.length || 0) + (a.pelicans?.length || 0);
   return `<div class="ov-actions">
-    <button class="btn ghost" type="button" data-ov-run="candy" data-ov-id="${esc(a.id)}" ${off}>${icon("candy")}测糖果</button>
+    <button class="btn ghost" type="button" data-ov-run="candy" data-ov-id="${esc(a.id)}" ${blocked ? off : `data-tip="按定时设置的模型和次数测一轮，计入降智判定"`}>${icon("candy")}测糖果</button>
     <button class="btn ghost" type="button" data-ov-run="pelican" data-ov-id="${esc(a.id)}" ${off}>${icon("play")}画鹈鹕</button>
+    <button class="btn ghost" type="button" data-ov-history="${esc(a.id)}" ${tested ? "" : "disabled"}>${icon("calendar")}历史</button>
   </div>`;
 }
 
 function ovCard(a) {
   const plan = ovPlan(a), state = ovVerdict(a.id)?.state || "";
   return `<article class="ov-card card ${state ? "is-" + state : ""} ${a.disabled ? "is-off" : ""}" data-ov-card="${esc(a.id)}">
-    <div class="ov-head">${plan ? `<span class="tag ${plan.badge ? "plan-" + plan.badge : ""}"><span>${esc(plan.label)}</span></span>` : ""}<span class="ov-name name" data-tip="${esc(ovLabel(a))}">${esc(ovLabel(a))}</span>${a.disabled ? `<span class="tag warn"><span>已停用</span></span>` : a.unavailable ? `<span class="tag warn" data-tip="${esc(unavailableReason(a))}"><span>不可用</span></span>` : ""}</div>
-    ${ovThumb(a)}
+    <div class="ov-head">${plan ? `<span class="tag ${plan.badge ? "plan-" + plan.badge : ""}"><span>${esc(plan.label)}</span></span>` : ""}<span class="ov-name name" data-tip="${esc(ovLabel(a))}">${esc(ovLabel(a))}</span>${a.disabled ? `<span class="tag warn"><span>已停用</span></span>` : a.unavailable ? `<span class="tag warn" data-tip="${esc(unavailableReason(a))}"><span>不可用</span></span>` : ""}${ovSkipped(a.id) ? `<span class="tag" data-tip="在「定时与通知设置」里取消了勾选，定时测试跳过这个账号"><span>不参与定时</span></span>` : ""}</div>
+    ${ovThumb(a)}${ovStrip(a)}
     <div class="ov-body">${ovStatus(a)}${ovCandy(a)}${ovJudge(a)}</div>
     ${ovActions(a)}
   </article>`;
@@ -143,12 +164,26 @@ function fillOverviewSettings() {
     if (field.type === "checkbox") field.checked = !!s[field.name];
     else field.value = s[field.name];
   }
+  renderOverviewAccounts();
   $("ov-password").innerHTML = ovSettings.password_set
     ? `${icon("circle-check")}<span>SMTP 授权码已在 CPR 里加密保存。要改授权码，请到 CPR「插件管理」→ 本插件 →「设置」。</span>`
     : `${icon("circle-alert")}<span>还没填 SMTP 授权码：请到 CPR「插件管理」→ 本插件 →「设置」里填写（CPR 加密保存，本页不经手授权码）。</span>`;
   $("ov-settings-status").textContent = "";
   // 第一次打开且还没开定时测试时，直接展开设置。
   if (!ovSettingsTouched && !s.hourly_candy_enabled) setOverviewSettingsOpen(true);
+}
+
+// 参与定时测试的账号：存的是取消勾选的账号，所以新加的账号默认参与。
+let ovAccountsKey = "";
+function renderOverviewAccounts() {
+  const skip = new Set(String(ovSettings?.settings?.schedule_skip || "").split(",").map((id) => id.trim()).filter(Boolean));
+  const accounts = [...credentials].sort((x, y) => planRank(x) - planRank(y) || ovLabel(x).localeCompare(ovLabel(y)));
+  const key = JSON.stringify([accounts.map((a) => [a.id, ovLabel(a), !!a.disabled]), [...skip]]);
+  if (key === ovAccountsKey) return;
+  ovAccountsKey = key;
+  $("ov-accounts").innerHTML = `<span class="field-label">参与账号</span>` + (accounts.length
+    ? accounts.map((a) => `<label${a.disabled ? ` data-tip="账号已停用，定时测试本来就会跳过"` : ""}><input type="checkbox" data-ov-account="${esc(a.id)}" ${skip.has(a.id) ? "" : "checked"}><span class="ov-name name">${esc(ovLabel(a))}</span></label>`).join("")
+    : `<span class="meta">还没有账号</span>`);
 }
 
 function setOverviewSettingsOpen(open) {
@@ -161,6 +196,8 @@ function collectOverviewSettings() {
   for (const field of $("ov-settings-form").elements) {
     if (field.name) out[field.name] = field.type === "checkbox" ? field.checked : field.value;
   }
+  out.schedule_skip = [...$("ov-settings-form").querySelectorAll("[data-ov-account]")]
+    .filter((box) => !box.checked).map((box) => box.dataset.ovAccount).join(",");
   return out;
 }
 
@@ -179,6 +216,8 @@ function renderOverview() {
   renderOverviewGrid();
   $("ov-run-now").disabled = pending || !credentials.some(usableCredential);
   if (ovSettings && !ovSettingsDirty && !$("ov-model").options.length) fillOverviewSettings();
+  if (ovSettings && !ovSettingsDirty) renderOverviewAccounts();
+  if ($("ov-history").open) renderOverviewHistory();
   refreshTip();
 }
 
@@ -198,7 +237,48 @@ async function overviewRequest(path, body, done) {
   }
 }
 
+// 一个账号的全部历史：鹈鹕画（可放大）和糖果题回答。插件最多留每个账号最近 20 条，存储满时先删最旧的。
+function ovCandyEntry(r) {
+  const answer = r.error || r.skipped ? `<span class="meta">${esc(r.error || "已跳过")}</span>`
+    : `<details class="ov-answer"><summary>看回答</summary><div class="markdown">${answerHTML(r)}</div></details>`;
+  return `<div class="ov-candy-row">${verdict(r)}<span class="mono">${esc(fmtTime(r.time, false))}</span><span class="meta">${esc(modelName(r))}${r.duration_ms ? " · " + fmtSec(r.duration_ms) : ""}</span>${answer}</div>`;
+}
+
+let ovHistoryKey = "";
+function renderOverviewHistory() {
+  const dialog = $("ov-history"), a = credentials.find((c) => c.id === dialog.dataset.credential);
+  if (!a) return dialog.close();
+  const pelicans = [...(a.pelicans || [])].reverse(), results = [...(a.results || [])].reverse();
+  const key = JSON.stringify([a.id, pelicans.map((r) => [r.id, pelicanPage(a.id, r.id) === undefined]), results.map((r) => [r.time, r.ok, r.error])]);
+  if (key === ovHistoryKey) return;
+  ovHistoryKey = key;
+  $("ov-history-title").textContent = `历史记录 · ${ovLabel(a)}`;
+  $("ov-history-body").innerHTML = `<p class="ov-hint">${icon("circle-help")}<span>每个账号最多保留最近 20 条；存储满时先删最旧的记录。点画面可以放大看动画。</span></p>
+    <h3 class="ov-history-head">鹈鹕画（${pelicans.length}）</h3>
+    <div class="ov-history-grid">${pelicans.map((r) => pelicanHistory(a, r)).join("") || `<div class="none">还没有记录</div>`}</div>
+    <h3 class="ov-history-head">糖果题（${results.length}）</h3>
+    <div class="ov-candy-list">${results.map(ovCandyEntry).join("") || `<div class="none">还没有记录</div>`}</div>`;
+}
+
+function openOverviewHistory(id) {
+  const dialog = $("ov-history");
+  dialog.dataset.credential = id;
+  ovHistoryKey = "";
+  renderOverviewHistory();
+  try {
+    showDialog(dialog);
+  } catch (error) {
+    setNotice("flash", "无法打开历史窗口：" + (error?.message || error));
+  }
+}
+
 function initializeOverview() {
+  $("ov-history-close").addEventListener("click", () => $("ov-history").close());
+  $("ov-history").addEventListener("close", () => { $("ov-history-body").innerHTML = ""; ovHistoryKey = ""; });
+  $("ov-history-body").addEventListener("click", (e) => {
+    const preview = e.target.closest("[data-pl-detail]");
+    if (preview) openResultDetail("pl", "pelican", preview.dataset.plCredential, preview.dataset.plDetail, showPelicanDetail);
+  });
   $("ov-search").addEventListener("input", (e) => { ovFilter.search = e.target.value; renderOverview(); });
   $("ov-state").addEventListener("change", (e) => { ovFilter.state = e.target.value; renderOverview(); });
   $("ov-settings-toggle").addEventListener("click", () => {
@@ -243,6 +323,13 @@ function initializeOverview() {
   $("ov-grid").addEventListener("click", (e) => {
     const preview = e.target.closest("[data-pl-detail]");
     if (preview) return openResultDetail("pl", "pelican", preview.dataset.plCredential, preview.dataset.plDetail, showPelicanDetail);
+    const history = e.target.closest("[data-ov-history]");
+    if (history) return history.disabled || openOverviewHistory(history.dataset.ovHistory);
+    const shot = e.target.closest("[data-ov-pick]");
+    if (shot) {
+      ovPick.set(shot.dataset.ovId, shot.dataset.ovPick);
+      return renderOverview();
+    }
     const button = e.target.closest("[data-ov-run]");
     if (!button || button.disabled) return;
     const s = ovSettings?.settings || {};
@@ -250,8 +337,9 @@ function initializeOverview() {
     const effort = s.hourly_candy_effort || hourlyCandy?.effort || "medium";
     const body = { auth_ids: [button.dataset.ovId], model, effort };
     if (button.dataset.ovRun === "candy") {
-      update("/run", { method: "POST", body: { ...body, runs: Number(s.schedule_candy_runs || hourlyCandy?.candy_runs || 1) } }, "开始测试失败");
+      update("/run", { method: "POST", body: { ...body, runs: Number(s.schedule_candy_runs || hourlyCandy?.candy_runs || 1), judge: true } }, "开始测试失败");
     } else {
+      ovPick.delete(button.dataset.ovId);
       update("/pelican/run", { method: "POST", body }, "开始测试失败");
     }
   });

@@ -469,6 +469,22 @@ dialog[open] { position: fixed; inset: auto; top: var(--dialog-top, 50%); left: 
 .ov-state.degraded { background: var(--danger-soft); color: var(--danger-ink); border-color: transparent; }
 .ov-actions { display: flex; gap: 8px; margin-top: auto; }
 .ov-actions .btn { flex: 1; height: 30px; min-width: 0; padding: 0 8px; }
+.ov-strip { display: flex; flex-wrap: wrap; gap: 4px; margin-top: -4px; }
+.ov-shot { flex: none; height: 22px; padding: 0 7px; border: 1px solid var(--control-line); border-radius: 999px; background: var(--control-bg); color: var(--muted); font: 11px/20px var(--mono, ui-monospace, monospace); cursor: pointer; }
+.ov-shot:hover { border-color: var(--accent); color: var(--ink); }
+.ov-shot.on { border-color: var(--accent); background: var(--accent); color: #fff; }
+.ov-shot.err { color: var(--warning-ink); }
+.ov-shot.more { font-family: inherit; }
+.ov-accounts .ov-name { max-width: 240px; font-weight: 400; }
+.ov-history { display: flex; flex-direction: column; gap: 12px; }
+.ov-history .ov-history-head { margin: 6px 0 0; font-size: 14px; }
+.ov-history-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.ov-history-grid .history-card-body { justify-content: center; }
+.ov-candy-list { display: flex; flex-direction: column; gap: 6px; }
+.ov-candy-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border: 1px solid var(--control-line); border-radius: 10px; background: var(--history-bg); font-size: 13px; }
+.ov-answer { flex-basis: 100%; }
+.ov-answer summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.ov-answer .markdown { margin-top: 6px; }
 .ov-settings { padding: 18px 20px; margin-bottom: 12px; }
 .ov-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 20px 32px; }
 .ov-settings fieldset { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }

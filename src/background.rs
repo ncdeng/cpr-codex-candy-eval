@@ -2,7 +2,7 @@
 use crate::{
     background_transport, candy, fingerprint, host_calls,
     management::{self, RunRequest},
-    model::{FingerprintProgress, RunProgress, TraceProgress},
+    model::{FingerprintProgress, PendingRound, RunProgress, TraceProgress},
     modeltrace, pelican, runs,
     state::StateManager,
 };
@@ -21,6 +21,7 @@ pub async fn submit(
     path: &str,
     payload: &[u8],
 ) -> Result<TypedReply<ManagementResponse>, PluginFault> {
+    let started_at = crate::hourly::now_iso();
     let request: RunRequest = match serde_json::from_slice(payload) {
         Ok(request) => request,
         Err(_) => return management::json_reply(400, &json!({"error":"测试请求格式错误"})),
@@ -59,7 +60,7 @@ pub async fn submit(
             &json!({"error":format!("每凭证并发须为 1–{max_concurrency}")}),
         );
     }
-    let shared = match background_transport::prepare_shared(host, config).await {
+    let shared = match background_transport::prepare_shared(host, config, state.live()).await {
         Ok(shared) => shared,
         Err(error) => {
             return management::json_reply(409, &json!({"error": error.message}));
@@ -99,6 +100,15 @@ pub async fn submit(
     } else {
         request.effort.trim().to_owned()
     };
+    if path == "api/run" && request.judge {
+        let round = PendingRound {
+            started_at,
+            model: model.clone(),
+            effort: effort.clone(),
+            runs: run_count,
+        };
+        state.start_rounds(host, &ids, round).await;
+    }
     for (credential, lease, executor) in prepared {
         match path {
             "api/run" => {
@@ -202,6 +212,7 @@ pub async fn submit(
             }
             // An active page flushes immediately. Without any page, the official
             // maintenance callback flushes within its normal 30-second interval.
+            state.live().wake();
             state.wait_for_commit().await;
             lease.finish().await;
         });

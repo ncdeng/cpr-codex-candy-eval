@@ -1,6 +1,6 @@
 //! 插件运行态与持久化：凭证历史、进行中的测试进度与宿主状态存储读写。
 //!
-//! 单个历史快照最多 240 KiB，经官方 KV 的双缓冲小分块保存，避免超过 IPC 64 KiB 元数据上限。
+//! 单个历史快照最多约 420 KiB，经官方 KV 的双缓冲小分块保存，避免超过 IPC 64 KiB 元数据上限。
 //! 底层索引最后 CAS 提交；保存串行化，读取或校验失败时不覆盖原记录。
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -63,6 +63,7 @@ pub struct StateManager {
     inner: Arc<RwLock<Inner>>,
     storage_lock: Arc<Mutex<()>>,
     commit_changed: Arc<tokio::sync::Notify>,
+    live: Arc<crate::live::LiveHost>,
 }
 
 impl Default for StateManager {
@@ -145,7 +146,13 @@ impl StateManager {
             inner: Arc::new(RwLock::new(Inner::default())),
             storage_lock: Arc::new(Mutex::new(())),
             commit_changed: Arc::new(tokio::sync::Notify::new()),
+            live: Arc::default(),
         }
+    }
+
+    /// 借用维护调用宿主连接的测试通道。
+    pub fn live(&self) -> &Arc<crate::live::LiveHost> {
+        &self.live
     }
 
     pub async fn acquire_run(&self, id: &str) -> Option<RunLease> {

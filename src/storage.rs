@@ -13,9 +13,10 @@ use crate::{
     state::{STATE_KEY, STATE_NAMESPACE},
 };
 
-pub const MAXIMUM_SNAPSHOT_BYTES: usize = 240 * 1024;
-const CHUNK_BYTES: usize = 16 * 1024;
-const MAX_CHUNKS: usize = 16;
+// 两组分块各 18 个，加索引共 37 条，不超过 CPR 每个插件 40 条记录；转义后每块仍小于 64 KiB。
+pub const MAXIMUM_SNAPSHOT_BYTES: usize = 420 * 1024;
+const CHUNK_BYTES: usize = 24 * 1024;
+const MAX_CHUNKS: usize = 18;
 const INDEX_KEY: &str = "snapshot-v2";
 const FORMAT: &str = "candy-eval-chunks-v2";
 
@@ -344,6 +345,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn escaped_chunks_stay_under_the_frame_limit() {
+        // 引号在快照里转义一次、放进分块再转义一次，是最坏情况。
+        let store = Memory::default();
+        let value = json!({"text":"\"".repeat(MAXIMUM_SNAPSHOT_BYTES / 2 - 16)});
+        assert!(serde_json::to_vec(&value).unwrap().len() <= MAXIMUM_SNAPSHOT_BYTES);
+        save(&store, &value, None).await.unwrap();
+        let records = store.records.lock().unwrap();
+        let largest = records
+            .values()
+            .map(|r| serde_json::to_vec(&r.value).unwrap().len())
+            .max()
+            .unwrap();
+        assert!(largest < 60 * 1024, "{largest}");
+    }
+
+    #[tokio::test]
     async fn full_capacity_saves_reuse_a_bounded_number_of_keys() {
         let store = Memory::default();
         let mut version = None;
@@ -358,7 +375,9 @@ mod tests {
             assert_eq!(load(&store).await.unwrap().unwrap().value, value);
         }
         let records = store.records.lock().unwrap();
-        assert!(records.len() <= 33);
+        // 两组分块加索引，不超过 CPR 每个插件 40 条记录。
+        assert!(records.len() <= 2 * MAX_CHUNKS + 1);
+        assert!(records.len() <= 40);
         assert!(
             records
                 .values()

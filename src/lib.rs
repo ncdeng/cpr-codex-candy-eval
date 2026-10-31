@@ -12,6 +12,7 @@ pub mod execution;
 pub mod fingerprint;
 pub mod host_calls;
 mod hourly;
+pub mod live;
 mod notify;
 pub mod management;
 pub mod manifest;

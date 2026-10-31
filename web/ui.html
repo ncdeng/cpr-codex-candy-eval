@@ -105,6 +105,7 @@ SOFTWARE.
                   <label><input type="checkbox" name="schedule_pelican">鹈鹕画图</label>
                   <label><input type="checkbox" name="schedule_fingerprint">模型指纹（快速，请求较多）</label>
                 </div>
+                <div id="ov-accounts" class="ov-checks ov-accounts"></div>
               </fieldset>
               <fieldset>
                 <legend><i data-icon="mail"></i>邮件通知</legend>
@@ -240,6 +241,10 @@ SOFTWARE.
           <button class="btn danger" value="confirm">清空记录</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="ov-history" class="result-dialog" aria-labelledby="ov-history-title">
+      <div class="section-head result-dialog-head"><h2 id="ov-history-title">历史记录</h2><button id="ov-history-close" class="btn ghost icon-button" type="button" aria-label="关闭历史记录"><i data-icon="x"></i></button></div>
+      <div id="ov-history-body" class="result-dialog-body ov-history"></div>
     </dialog>
     <dialog id="fp-detail" class="result-dialog" aria-labelledby="fp-detail-title">
       <div class="section-head result-dialog-head"><h2 id="fp-detail-title">指纹详情</h2><button id="fp-detail-close" class="btn ghost icon-button" type="button" aria-label="关闭详情"><i data-icon="x"></i></button></div>

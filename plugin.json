@@ -3,7 +3,7 @@
   "name": "codex-candy-eval",
   "displayName": "Codex 降智与指纹测试",
   "publisher": "ncdeng",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "description": "CPR（codex-proxy-rs）原生 Rust 插件：Codex 账号降智检测、模型指纹对比、深度追踪与鹈鹕绘图测试套件（魔改移植自 cpa-plugin-codex-candy-eval）",
   "license": "MIT",
   "author": "nmbb",
@@ -36,7 +36,7 @@
       "test_key_id": {
         "type": "string",
         "title": "高级：共享测试 Key ID",
-        "description": "一般留空：留空时插件为每个账号自动创建只含该账号的测试分组和 Key，测试结果一定记在回答的账号上。填写后改为所有账号共用这个已有 Key（CPR 自行选号，结果可能记错账号）。"
+        "description": "一般留空：留空时插件用账号所在分组里已有的 Key 直接指定账号测试，不新建分组和 Key（只有不在任何已有 Key 分组里的账号才自动建）。填写后改为所有账号共用这个 Key（CPR 自行选号，结果可能记错账号）。"
       },
       "test_key_name": {
         "type": "string",

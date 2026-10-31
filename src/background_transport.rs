@@ -1,10 +1,13 @@
 //! Use one administrator-selected CPR Client Key, then release the SDK scope before execution.
-//! Without a selected Key, each account gets an instance-owned single-account group and Key,
-//! so a test request can only be answered by the account it is recorded under.
+//! Without a selected Key, an account is tested through an existing Key whose groups include it,
+//! pinned to that account by CPR (see live.rs); only an account outside every existing Key gets
+//! an instance-owned single-account group and Key.
 use crate::{
-    execution::{self, HttpExecutor},
+    execution::{self, HttpExecutor, JobExecutor},
+    live::{LiveExecutor, LiveHost},
     model::Credential,
 };
+use std::{collections::BTreeMap, sync::Arc};
 use gateway_plugin_sdk::call::{
     middleware::http::Version,
     resources::{GroupEnsureRequest, GroupMembersChange, KeyEnsureRequest},
@@ -26,6 +29,8 @@ struct Envelope<T> {
 }
 #[derive(Deserialize)]
 struct GroupRef {
+    #[serde(default)]
+    id: String,
     enabled: bool,
 }
 #[derive(Deserialize)]
@@ -297,11 +302,77 @@ async fn owned_key(host: &HostClient, credential: &Credential) -> Result<String,
     Ok(secret.plaintext_key)
 }
 
-/// Resolve and reveal the configured Key once for a whole background batch,
-/// or leave it empty to provision one owned Key per account.
+/// 插件自己建的测试 Key 都以这个前缀命名。
+const OWNED_PREFIX: &str = "降智测试·";
+
+/// 账号 → 一个已有 Key 的编号，这个 Key 的启用分组里包含该账号。只看启用的 Key；
+/// 同时有多个时优先别人的 Key（插件自建的旧 Key 删掉也不受影响），再挑分组少的。
+/// 读不到目录时返回空表，调用方退回自建 Key。
+pub async fn existing_keys(host: &HostClient) -> BTreeMap<String, String> {
+    let mut keys = Vec::new();
+    let mut cursor = String::new();
+    for _ in 0..20 {
+        let mut params = vec![("limit", "100")];
+        if !cursor.is_empty() {
+            params.push(("cursor", cursor.as_str()));
+        }
+        let Ok(page) = admin::<Keys>(host, query("/api/admin/client-keys", &params)).await else {
+            return BTreeMap::new();
+        };
+        keys.extend(page.items.into_iter().filter(|key| key.enabled));
+        let Some(next) = page.next_cursor.filter(|next| !next.is_empty() && next != &cursor) else {
+            break;
+        };
+        cursor = next;
+    }
+    keys.sort_by_key(|key| (key.name.starts_with(OWNED_PREFIX), key.groups.len(), key.name.clone()));
+    let mut members: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut chosen = BTreeMap::new();
+    for key in &keys {
+        for group in key.groups.iter().filter(|group| group.enabled && !group.id.is_empty()) {
+            if !members.contains_key(&group.id) {
+                let Some(accounts) = group_members(host, &group.id).await else {
+                    continue;
+                };
+                members.insert(group.id.clone(), accounts);
+            }
+            for account in &members[&group.id] {
+                chosen.entry(account.clone()).or_insert_with(|| key.id.clone());
+            }
+        }
+    }
+    chosen
+}
+
+async fn group_members(host: &HostClient, group: &str) -> Option<Vec<String>> {
+    let mut accounts = Vec::new();
+    for page in 1..=20u32 {
+        let page_text = page.to_string();
+        let data: Members = admin(
+            host,
+            query(
+                "/api/admin/accounts",
+                &[("groupId", group), ("page", &page_text), ("pageSize", "100")],
+            ),
+        )
+        .await
+        .ok()?;
+        let count = data.items.len();
+        accounts.extend(data.items.into_iter().map(|member| member.id));
+        if count < 100 || accounts.len() as u64 >= data.page.total {
+            break;
+        }
+    }
+    Some(accounts)
+}
+
+/// Resolve and reveal the configured Key once for a whole background batch; without one,
+/// map each account to an existing Key, and provision owned Keys only for the rest.
 pub struct PreparedTransport {
     endpoint: Url,
     shared_key: Option<String>,
+    existing: BTreeMap<String, String>,
+    live: Arc<LiveHost>,
 }
 
 impl PreparedTransport {
@@ -309,10 +380,18 @@ impl PreparedTransport {
         &self,
         host: &HostClient,
         credential: &Credential,
-    ) -> Result<HttpExecutor, PluginFault> {
-        let plaintext_key = match &self.shared_key {
-            Some(key) => key.clone(),
-            None => owned_key(host, credential).await?,
+    ) -> Result<JobExecutor, PluginFault> {
+        let plaintext_key = match (&self.shared_key, self.existing.get(&credential.id)) {
+            (Some(key), _) => key.clone(),
+            (None, Some(key_id)) => {
+                return Ok(JobExecutor::Live(LiveExecutor::new(
+                    Arc::clone(&self.live),
+                    key_id.clone(),
+                    credential.id.clone(),
+                    credential.provider.clone(),
+                )))
+            }
+            (None, None) => owned_key(host, credential).await?,
         };
         HttpExecutor::new(
             self.endpoint.clone(),
@@ -320,12 +399,14 @@ impl PreparedTransport {
             credential.provider.clone(),
             plaintext_key,
         )
+        .map(JobExecutor::Http)
     }
 }
 
 pub async fn prepare_shared(
     host: &HostClient,
     config: &Value,
+    live: &Arc<LiveHost>,
 ) -> Result<PreparedTransport, PluginFault> {
     let endpoint = execution::endpoint(
         config
@@ -337,6 +418,8 @@ pub async fn prepare_shared(
         return Ok(PreparedTransport {
             endpoint,
             shared_key: None,
+            existing: existing_keys(host).await,
+            live: Arc::clone(live),
         });
     }
     let key = find_key(host, config).await?;
@@ -359,6 +442,8 @@ pub async fn prepare_shared(
     Ok(PreparedTransport {
         endpoint,
         shared_key: Some(secret.plaintext_key),
+        existing: BTreeMap::new(),
+        live: Arc::clone(live),
     })
 }
 

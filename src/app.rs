@@ -26,9 +26,22 @@ pub fn plugin_with_config(configuration: serde_json::Value) -> Result<ComposedPl
             let state = Arc::clone(&maintenance_state);
             let config = maintenance_config.clone();
             async move {
+                // 停留到预算快用完：期间每 30 秒做一次定时检查，并把宿主连接借给后台测试。
+                let window = crate::live::Window::new(call.host.remaining_budget());
                 state.ensure_loaded(&call.host).await;
+                let live = state.live();
+                live.publish(&call.host, &call.cancellation);
+                loop {
+                    state.flush_pending(&call.host).await;
+                    crate::hourly::tick(&state, &call.host, &config).await;
+                    let next = tokio::time::Instant::now() + crate::live::TICK;
+                    if next >= window.serve_until {
+                        break;
+                    }
+                    live.rest(next).await;
+                }
+                live.withdraw(window.return_by).await;
                 state.flush_pending(&call.host).await;
-                crate::hourly::tick(&state, &call.host, &config).await;
                 Ok(TypedReply::new(Default::default()))
             }
         })?

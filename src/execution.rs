@@ -1,5 +1,5 @@
-//! Two execution paths: native SDK for existing synchronous callers, and loopback HTTP
-//! with an administrator-selected shared Key for jobs independent of any RPC scope.
+//! Execution paths: native SDK for existing synchronous callers, native SDK through the
+//! maintenance call for background jobs (live.rs), and loopback HTTP with a revealed Key.
 use crate::host_calls::{self, ModelAnswer, ModelError, ModelFailure};
 use gateway_plugin_sdk::{client::HostClient, ErrorCode, PluginFault};
 use reqwest::{
@@ -163,6 +163,32 @@ impl ExecutionContext for HttpExecutor {
         host_calls::parse_response(&bytes, started)
     }
 }
+/// 一个后台任务实际使用的执行方式：本机接口加 Key 明文，或借用维护调用（见 live.rs）。
+#[derive(Clone)]
+pub enum JobExecutor {
+    Http(HttpExecutor),
+    Live(crate::live::LiveExecutor),
+}
+impl StorageContext for JobExecutor {
+    fn storage_host(&self) -> Option<&HostClient> {
+        None
+    }
+}
+impl ExecutionContext for JobExecutor {
+    async fn execute(
+        &self,
+        account: &str,
+        provider: &str,
+        model: &str,
+        body: &Value,
+    ) -> Result<ModelAnswer, ModelError> {
+        match self {
+            Self::Http(executor) => executor.execute(account, provider, model, body).await,
+            Self::Live(executor) => executor.execute(account, provider, model, body).await,
+        }
+    }
+}
+
 fn network_error(error: reqwest::Error) -> ModelError {
     let message = if error.is_timeout() {
         "后台模型请求超时"

@@ -30,11 +30,13 @@ const CHOICE_SETTINGS: [(&str, &[&str]); 6] = [
     ("smtp_port", &["465", "587"]),
 ];
 /// 文本设置及长度上限；授权码不在其中，只走 CPR 的加密敏感字段。
-const TEXT_SETTINGS: [(&str, usize); 4] = [
+const TEXT_SETTINGS: [(&str, usize); 5] = [
     ("hourly_candy_model", 200),
     ("smtp_host", 253),
     ("smtp_username", 254),
     ("email_to", 1000),
+    // 不参与定时测试的账号 ID，逗号分隔；新加的账号默认参与。
+    ("schedule_skip", 8000),
 ];
 
 /// 页面设置覆盖 CPR 插件配置里的同名值（1.8.0 时这些项在 CPR 配置里）。
@@ -76,6 +78,13 @@ pub(crate) fn validate_settings(input: &Value) -> Result<serde_json::Map<String,
             if key == "hourly_candy_model" && !crate::host_calls::valid_model_name(text) {
                 return Err("请选择不含推理强度后缀的模型".to_owned());
             }
+            if key == "schedule_skip"
+                && !text
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':' | ','))
+            {
+                return Err("参与账号的设置格式不对".to_owned());
+            }
             settings.insert(key.to_owned(), Value::String(text.to_owned()));
         } else {
             return Err(format!("不支持的设置项：{key}"));
@@ -102,6 +111,7 @@ pub(crate) fn settings_view(config: &Value) -> Value {
         ("smtp_host", "smtp.qq.com"),
         ("smtp_username", ""),
         ("email_to", ""),
+        ("schedule_skip", ""),
     ];
     for (key, default) in defaults {
         let value = config.get(key).and_then(Value::as_str).unwrap_or(default);
@@ -177,6 +187,19 @@ pub(crate) fn suites(config: &Value) -> Vec<String> {
     .collect()
 }
 
+/// 用户取消勾选、不参与定时测试的账号。
+pub(crate) fn skipped(config: &Value) -> std::collections::BTreeSet<String> {
+    config
+        .get("schedule_skip")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 fn candy_runs(config: &Value) -> u32 {
     choice(config, "schedule_candy_runs", 3, 1..=5)
 }
@@ -206,7 +229,7 @@ fn time(value: i64) -> Option<String> {
         .flatten()
 }
 
-fn now_iso() -> String {
+pub(crate) fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
@@ -400,6 +423,7 @@ pub async fn status(state: &StateManager, config: &Value) -> Value {
         "last_started_at":time(last),
         "next_run_at":if enabled(config) && last > 0 { time(last.saturating_add(interval)) } else { None },
         "last_dispatch":dispatch, "queue":state.schedule_queue().await,
+        "skip":skipped(config),
         "email":mail, "verdicts":verdicts})
 }
 
@@ -423,45 +447,58 @@ async fn send_mails(state: &StateManager, host: &HostClient, config: &Value) {
     }
 }
 
-fn payload(suite: &str, config: &Value) -> (&'static str, Value) {
-    match suite {
+/// `ids` 为空表示全部账号；糖果题带 `judge`，跑完按判定规则结算。
+fn payload(suite: &str, config: &Value, ids: &[String]) -> (&'static str, Value) {
+    let (path, mut body) = match suite {
         "pelican" => (
             "api/pelican/run",
-            json!({"all":true, "model":model(config), "effort":effort(config)}),
+            json!({"model":model(config), "effort":effort(config)}),
         ),
         "fingerprint" => (
             "api/fingerprint/run",
-            json!({"all":true, "model":model(config), "effort":effort(config), "mode":"quick"}),
+            json!({"model":model(config), "effort":effort(config), "mode":"quick"}),
         ),
         _ => (
             "api/run",
-            json!({"all":true, "runs":candy_runs(config), "model":model(config), "effort":effort(config)}),
+            json!({"runs":candy_runs(config), "model":model(config), "effort":effort(config), "judge":true}),
         ),
+    };
+    if ids.is_empty() {
+        body["all"] = json!(true);
+    } else {
+        body["auth_ids"] = json!(ids);
     }
+    (path, body)
 }
 
 async fn dispatch_next(state: &Arc<StateManager>, host: &HostClient, config: &Value) {
     let Some(suite) = state.next_scheduled_suite().await else {
         return;
     };
-    let (path, body) = payload(&suite, config);
-    let started_at = now_iso();
+    let skip = skipped(config);
+    let ids: Vec<String> = if skip.is_empty() {
+        Vec::new()
+    } else {
+        let _ = management::refresh_credentials(state, host).await;
+        let ids: Vec<String> = state
+            .credentials()
+            .await
+            .into_iter()
+            .map(|credential| credential.id)
+            .filter(|id| !skip.contains(id))
+            .collect();
+        if ids.is_empty() {
+            state
+                .set_hourly_dispatch(json!({"status":"no_accounts", "suite":suite}))
+                .await;
+            return;
+        }
+        ids
+    };
+    let (path, body) = payload(&suite, config, &ids);
     let dispatch = match background::submit(state, host, config, path, body.to_string().as_bytes()).await {
         Ok(reply) if reply.result.status == 202 => {
             let reply = serde_json::from_slice::<Value>(&reply.payload).unwrap_or_default();
-            if suite == "candy" {
-                let ids: Vec<String> = reply["auth_ids"]
-                    .as_array()
-                    .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect())
-                    .unwrap_or_default();
-                let round = PendingRound {
-                    started_at,
-                    model: model(config).to_owned(),
-                    effort: effort(config).to_owned(),
-                    runs: candy_runs(config),
-                };
-                state.start_rounds(host, &ids, round).await;
-            }
             json!({"status":"dispatched", "suite":suite, "started":reply["started"],
                 "busy":reply["busy"].as_array().map_or(0, Vec::len),
                 "skipped":reply["skipped"].as_array().map_or(0, Vec::len)})
@@ -531,6 +568,23 @@ mod tests {
         assert!(!due(13_600, 13_600, 3600));
         assert!(!due(10_000, 9_999, 3600));
         assert!(due(10_000, 11_800, 1800));
+    }
+
+    #[test]
+    fn skipped_accounts_are_left_out_and_candy_rounds_are_judged() {
+        let config = json!({"schedule_skip":" acct_a, ,acct_b "});
+        assert_eq!(skipped(&config).into_iter().collect::<Vec<_>>(), ["acct_a", "acct_b"]);
+        assert!(skipped(&json!({})).is_empty());
+        let (path, body) = payload("candy", &json!({}), &[]);
+        assert_eq!(path, "api/run");
+        assert_eq!(body["all"], true);
+        assert_eq!(body["judge"], true);
+        let (path, body) = payload("pelican", &json!({}), &["acct_c".to_owned()]);
+        assert_eq!(path, "api/pelican/run");
+        assert_eq!(body["auth_ids"], json!(["acct_c"]));
+        assert!(body.get("all").is_none());
+        assert!(validate_settings(&json!({"schedule_skip":"acct_1,acct-2"})).is_ok());
+        assert!(validate_settings(&json!({"schedule_skip":"acct 1"})).is_err());
     }
 
     #[test]
