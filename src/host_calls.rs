@@ -1,6 +1,9 @@
 //! 宿主回调封装：账号事实、模型目录、状态持久化与按账号执行的模型流式调用。
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant},
+};
 
 use gateway_plugin_sdk::{
     call::{
@@ -653,8 +656,9 @@ where
     let mut last: Option<ModelError> = None;
     for attempt in 0..3u32 {
         attempts += 1;
+        let limit = probe_timeout();
         let outcome = tokio::time::timeout(
-            PROBE_TIMEOUT,
+            limit,
             host.execute(account_id, provider, model, &body()),
         )
         .await;
@@ -663,7 +667,7 @@ where
             Err(_) => {
                 last = Some(ModelError::other(
                     ModelFailure::Host,
-                    "模型 3 分钟内未完成回答，已中断请求",
+                    format!("模型 {} 分钟内未完成回答，已中断请求", limit.as_secs() / 60),
                 ));
                 if attempt == 2 {
                     break;
@@ -699,8 +703,18 @@ pub fn valid_model_name(model: &str) -> bool {
         && !model.contains(['(', ')'])
 }
 
-/// 单次探测期限：模型回答最长 3 分钟。
-pub const PROBE_TIMEOUT: Duration = Duration::from_secs(180);
+/// 单次探测的回答期限默认值（分钟）；页面设置里可以改。
+pub const DEFAULT_PROBE_TIMEOUT_MINUTES: u32 = 10;
+/// 当前生效的单次探测期限（秒），所有探测共用；页面保存设置和每次定时检查时同步。
+static PROBE_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(DEFAULT_PROBE_TIMEOUT_MINUTES as u64 * 60);
+
+pub fn set_probe_timeout_minutes(minutes: u32) {
+    PROBE_TIMEOUT_SECS.store(u64::from(minutes.max(1)) * 60, Ordering::Relaxed);
+}
+
+pub fn probe_timeout() -> Duration {
+    Duration::from_secs(PROBE_TIMEOUT_SECS.load(Ordering::Relaxed))
+}
 
 #[cfg(test)]
 mod tests {

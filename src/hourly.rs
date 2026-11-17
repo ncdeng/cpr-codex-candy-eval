@@ -22,13 +22,15 @@ const BOOL_SETTINGS: [&str; 5] = [
     "schedule_fingerprint",
     "email_enabled",
 ];
-const CHOICE_SETTINGS: [(&str, &[&str]); 6] = [
+const CHOICE_SETTINGS: [(&str, &[&str]); 7] = [
     ("schedule_interval", &["30m", "1h", "2h", "3h", "6h", "12h", "24h"]),
     ("hourly_candy_effort", &["none", "low", "medium", "high", "xhigh", "max"]),
     ("schedule_candy_runs", &["1", "2", "3", "4", "5"]),
     ("judge_pass_min", &["1", "2", "3", "4", "5"]),
     ("judge_confirm_rounds", &["1", "2", "3"]),
     ("smtp_port", &["465", "587"]),
+    // 单次测试等待模型回答的最长分钟数，所有测试共用，见 apply_probe_timeout。
+    ("probe_timeout_minutes", &["3", "5", "8", "10"]),
 ];
 /// 文本设置及长度上限；授权码不在其中，只走 CPR 的加密敏感字段。
 const TEXT_SETTINGS: [(&str, usize); 5] = [
@@ -47,6 +49,17 @@ pub(crate) fn effective(config: &Value, settings: &serde_json::Map<String, Value
         merged.insert(key.clone(), value.clone());
     }
     Value::Object(merged)
+}
+
+/// 把页面设置的单次超时同步给探测使用；保存设置和每次定时检查时各调用一次。
+pub(crate) fn apply_probe_timeout(config: &Value) {
+    let minutes = choice(
+        config,
+        "probe_timeout_minutes",
+        crate::host_calls::DEFAULT_PROBE_TIMEOUT_MINUTES,
+        3..=10,
+    );
+    crate::host_calls::set_probe_timeout_minutes(minutes);
 }
 
 /// 校验页面提交的设置；只接受已知字段和取值，未知字段或授权码直接拒绝。
@@ -108,6 +121,7 @@ pub(crate) fn settings_view(config: &Value) -> Value {
         ("judge_pass_min", "2"),
         ("judge_confirm_rounds", "1"),
         ("smtp_port", "465"),
+        ("probe_timeout_minutes", "10"),
         ("hourly_candy_model", "gpt-6.1-sol"),
         ("smtp_host", "smtp.qq.com"),
         ("smtp_username", ""),
@@ -544,6 +558,7 @@ pub async fn run_now(state: &Arc<StateManager>, host: &HostClient, config: &Valu
 
 pub async fn tick(state: &Arc<StateManager>, host: &HostClient, config: &Value) {
     let config = &effective(config, &state.settings().await);
+    apply_probe_timeout(config);
     if state.has_pending_rounds().await {
         // 结算和邮件需要账号显示名；读取失败时仍按 ID 结算。
         let _ = management::refresh_credentials(state, host).await;
@@ -718,6 +733,14 @@ mod tests {
         ] {
             assert!(validate_settings(&bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn probe_timeout_is_a_page_choice_that_defaults_to_ten_minutes() {
+        assert_eq!(settings_view(&json!({}))["settings"]["probe_timeout_minutes"], "10");
+        assert!(validate_settings(&json!({"probe_timeout_minutes":"5"})).is_ok());
+        assert!(validate_settings(&json!({"probe_timeout_minutes":"7"})).is_err());
+        assert!(validate_settings(&json!({"probe_timeout_minutes":5})).is_err());
     }
 
     #[test]

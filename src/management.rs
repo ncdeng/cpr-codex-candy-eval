@@ -212,6 +212,7 @@ pub async fn handle_with_config(
                 Ok(settings) => match state.save_settings(host, settings).await {
                     Ok(()) => {
                         let effective = crate::hourly::effective(config, &state.settings().await);
+                        crate::hourly::apply_probe_timeout(&effective);
                         json_reply(200, &crate::hourly::settings_view(&effective))
                     }
                     Err(error) => json_reply(409, &json!({"error":format!("保存设置失败：{error}")})),

@@ -96,7 +96,8 @@ impl HttpExecutor {
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(360))
+            // 比单次探测期限多留一分钟，超时由探测一侧先报出
+            .timeout(crate::host_calls::probe_timeout() + Duration::from_secs(60))
             .build()
             .map_err(|_| invalid("无法初始化后台测试连接"))?;
         Ok(Self {

@@ -98,6 +98,9 @@ SOFTWARE.
                   <label class="field"><span class="field-label">连续几轮一致才改状态</span><span class="native-select"><select name="judge_confirm_rounds">
                     <option>1</option><option>2</option><option>3</option>
                   </select></span></label>
+                  <label class="field" data-tip="单次测试等待模型回答的最长时间，超过就中断并记为失败。推理强度高时回答较慢，可以调大。"><span class="field-label">单次超时</span><span class="native-select"><select name="probe_timeout_minutes">
+                    <option value="3">3 分钟</option><option value="5">5 分钟</option><option value="8">8 分钟</option><option value="10">10 分钟</option>
+                  </select></span></label>
                 </div>
                 <div class="ov-checks">
                   <span class="field-label">测试项</span>

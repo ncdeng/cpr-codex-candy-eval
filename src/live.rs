@@ -17,8 +17,14 @@ use tokio::time::Instant;
 
 /// 向 CPR 声明的维护调用预算。
 pub const MAINTENANCE_BUDGET_MS: u64 = 15 * 60 * 1000;
-/// 停止接新调用后，留给进行中模型调用收尾的时间。
-const DRAIN: Duration = Duration::from_secs(4 * 60);
+/// 停止接新调用后，留给进行中模型调用收尾的最短时间。
+const DRAIN_MIN: Duration = Duration::from_secs(4 * 60);
+
+/// 收尾时间至少要能让一次探测跑完；页面设置的单次超时更长时，按它留足。
+fn drain() -> Duration {
+    DRAIN_MIN.max(host_calls::probe_timeout())
+}
+
 /// 返回前再留的余量，保证在 CPR 的期限之前回复。
 const MARGIN: Duration = Duration::from_secs(20);
 /// 维护调用里两次定时检查的间隔，和 CPR 平时的维护间隔一致。
@@ -61,7 +67,7 @@ impl Window {
         let now = Instant::now();
         let remaining = remaining.unwrap_or_default();
         Self {
-            serve_until: now + remaining.saturating_sub(DRAIN + MARGIN),
+            serve_until: now + remaining.saturating_sub(drain() + MARGIN),
             return_by: now + remaining.saturating_sub(MARGIN),
         }
     }
@@ -213,7 +219,9 @@ mod tests {
         let budget = Duration::from_millis(MAINTENANCE_BUDGET_MS);
         let window = Window::new(Some(budget));
         assert!(window.serve_until < window.return_by);
-        assert!(window.return_by - window.serve_until >= DRAIN - Duration::from_secs(1));
+        assert!(window.return_by - window.serve_until >= drain() - Duration::from_secs(1));
+        // 停止接新调用后，最晚开始的一次探测也能在返回前跑完。
+        assert!(window.serve_until + crate::host_calls::probe_timeout() <= window.return_by);
         // CPR 只给默认 120 秒时不提供连接，直接收尾。
         let short = Window::new(Some(Duration::from_secs(120)));
         assert!(short.serve_until <= Instant::now());
